@@ -65,6 +65,7 @@ cmd_build() {
 }
 
 cmd_clean() {
+    check_toolchain
     log_info "Cleaning..."
     scons -c -Q
     rm -rf "$BUILD_DIR"
