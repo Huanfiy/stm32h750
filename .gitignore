@@ -49,3 +49,5 @@ tmp/
 rtthread.bin
 rtthread.elf
 rt-thread.elf
+
+packages/
