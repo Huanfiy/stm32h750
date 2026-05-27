@@ -1,0 +1,27 @@
+import os
+import rtconfig
+from building import *
+
+Import('SDK_LIB')
+
+objs = []
+cwd = GetCurrentDir()
+list = os.listdir(cwd)
+
+path = [cwd]
+path += [cwd + '/CubeMX_Config/Inc']
+
+src = Glob('board.c')
+src += Glob('CubeMX_Config/Src/stm32h7xx_hal_msp.c')
+
+for item in list:
+    if os.path.isfile(os.path.join(cwd, item, 'SConscript')):
+        objs = objs + SConscript(os.path.join(item, 'SConscript'))
+
+startup_path_prefix = SDK_LIB
+src += [startup_path_prefix + '/STM32H7xx_HAL/CMSIS/Device/ST/STM32H7xx/Source/Templates/gcc/startup_stm32h750xx.s']
+
+CPPDEFINES = ['STM32H750xx']
+group = DefineGroup('Drivers', src, depend = [''], CPPPATH = path, CPPDEFINES = CPPDEFINES)
+
+Return('group')
