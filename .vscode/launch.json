@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "debug-load",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/rtthread.elf",
+      "request": "launch",
+      "type": "cortex-debug",
+      "device": "STM32H750VBTx",
+      "servertype": "jlink",
+      "interface": "swd",
+      "runToEntryPoint": "main",
+      "showDevDebugOutput": "parsed",
+      "preLaunchCommands": [
+        "monitor reset halt",
+        "load",
+        "monitor reset halt"
+      ]
+    },
+    {
+      "name": "debug-attach",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/rtthread.elf",
+      "request": "attach",
+      "type": "cortex-debug",
+      "device": "STM32H750VBTx",
+      "servertype": "jlink",
+      "interface": "swd",
+      "showDevDebugOutput": "parsed"
+    }
+  ]
+}

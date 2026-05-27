@@ -1,0 +1,28 @@
+{
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "clangd.enable": true,
+
+  "[c]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+  "[cpp]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+
+  "C_Cpp.default.compilerPath": "/home/huan/toolchain/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc",
+  "C_Cpp.default.intelliSenseMode": "linux-gcc-arm",
+  "clangd.arguments": [
+    "--header-insertion=never",
+    "--completion-style=detailed",
+    "--compile-commands-dir=${workspaceFolder}/.vscode",
+    "--background-index",
+    "--clang-tidy",
+    "--query-driver=/home/huan/toolchain/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc"
+  ],
+  "cmake.ignoreCMakeListsMissing": true,
+  "files.associations": {
+    "board.h": "c",
+    "drv_common.h": "c",
+    "rtdevice.h": "c"
+  }
+}
