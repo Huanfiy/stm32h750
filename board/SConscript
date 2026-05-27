@@ -13,6 +13,7 @@ path += [cwd + '/CubeMX_Config/Inc']
 
 src = Glob('board.c')
 src += Glob('CubeMX_Config/Src/stm32h7xx_hal_msp.c')
+src += Glob('CubeMX_Config/Src/system_stm32h7xx.c')
 
 for item in list:
     if os.path.isfile(os.path.join(cwd, item, 'SConscript')):
