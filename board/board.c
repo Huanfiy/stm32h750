@@ -10,6 +10,7 @@
 
 #include "board.h"
 
+#ifdef RT_USING_MEMHEAP
 #define AXI_SRAM_ADDR (0X24000000)
 #define AXI_SRAM_SIZE (512*1024)
 #define SRAM1_ADDR (0X30000000)
@@ -29,6 +30,7 @@ static struct rt_memheap _heap_sram2;
 static struct rt_memheap _heap_sram3;
 static struct rt_memheap _heap_sram4;
 static struct rt_memheap _heap_backup_sram;
+#endif
 
 /**
   * @brief System Clock Configuration
@@ -100,6 +102,7 @@ void SystemClock_Config(void)
   }
 }
 
+#ifdef RT_USING_MEMHEAP
 static int init_sram(void)
 {
     __HAL_RCC_D2SRAM1_CLK_ENABLE();
@@ -115,6 +118,7 @@ static int init_sram(void)
     return 0;
 }
 INIT_BOARD_EXPORT(init_sram);
+#endif
 
 /**
  * Function    ota_app_vtor_reconfig

@@ -45,6 +45,7 @@ compile_commands.json
 CLAUDE.md
 tmp/
 
-# RT-Thread generated
+# RT-Thread generated (legacy root outputs)
 rtthread.bin
 rtthread.elf
+rt-thread.elf

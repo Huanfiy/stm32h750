@@ -448,6 +448,7 @@
 #define BSP_USING_ADC1
 #define BSP_USING_ADC3
 #define BSP_USING_SDIO
+#define BSP_USING_SDIO1
 #define BSP_USING_UDID
 /* end of On-chip Peripheral Drivers */
 

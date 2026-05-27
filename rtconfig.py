@@ -25,10 +25,14 @@ SIZE    = PREFIX + 'size'
 OBJDUMP = PREFIX + 'objdump'
 OBJCPY  = PREFIX + 'objcopy'
 
+BUILD_DIR = 'build'
+PROJECT_NAME = 'rtthread'
+TARGET = os.path.join(BUILD_DIR, PROJECT_NAME + '.' + TARGET_EXT)
+
 DEVICE = ' -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -ffunction-sections -fdata-sections'
 CFLAGS = DEVICE + ' -Dgcc'
 AFLAGS = ' -c' + DEVICE + ' -x assembler-with-cpp -Wa,-mimplicit-it=thumb '
-LFLAGS = DEVICE + ' -Wl,--gc-sections,-Map=rtthread.map,-cref,-u,Reset_Handler -T board/linker_scripts/link.lds'
+LFLAGS = DEVICE + ' -Wl,--gc-sections,-Map=' + BUILD_DIR + '/' + PROJECT_NAME + '.map,-cref,-u,Reset_Handler -T board/linker_scripts/link.lds'
 
 CPATH = ''
 LPATH = ''
@@ -42,4 +46,6 @@ else:
 CXXFLAGS = CFLAGS
 CFLAGS += ' -std=c99'
 
-POST_ACTION = OBJCPY + ' -O binary $TARGET rtthread.bin\n' + SIZE + ' $TARGET \n'
+POST_ACTION = OBJCPY + ' -O binary $TARGET ' + BUILD_DIR + '/' + PROJECT_NAME + '.bin\n' + \
+              OBJDUMP + ' -D $TARGET > ' + BUILD_DIR + '/' + PROJECT_NAME + '.asm\n' + \
+              SIZE + ' $TARGET\n'

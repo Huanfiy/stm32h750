@@ -9,8 +9,9 @@ readonly JLINK_DEVICE="STM32H750VB"
 readonly JLINK_INTF="SWD"
 readonly JLINK_SPEED="4000"
 readonly FLASH_ADDR="0x08000000"
-readonly ELF_FILE="rtthread.elf"
-readonly BIN_FILE="rtthread.bin"
+readonly BUILD_DIR="build"
+readonly ELF_FILE="${BUILD_DIR}/rtthread.elf"
+readonly BIN_FILE="${BUILD_DIR}/rtthread.bin"
 
 readonly R='\033[0;31m'
 readonly G='\033[0;32m'
@@ -66,7 +67,7 @@ cmd_build() {
 cmd_clean() {
     log_info "Cleaning..."
     scons -c -Q
-    rm -f "$ELF_FILE" "$BIN_FILE" rtthread.map
+    rm -rf "$BUILD_DIR"
     log_success "Clean complete."
 }
 

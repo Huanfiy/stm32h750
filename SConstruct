@@ -15,9 +15,10 @@ except:
     print(RTT_ROOT)
     exit(-1)
 
-TARGET = 'rt-thread.' + rtconfig.TARGET_EXT
+TARGET = rtconfig.TARGET
 
 DefaultEnvironment(tools=[])
+Execute(Mkdir(rtconfig.BUILD_DIR))
 env = Environment(tools = ['mingw'],
     AS = rtconfig.AS, ASFLAGS = rtconfig.AFLAGS,
     CC = rtconfig.CC, CFLAGS = rtconfig.CFLAGS,
