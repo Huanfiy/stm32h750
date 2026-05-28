@@ -9,8 +9,14 @@ MEMORY
     /* XIP from external W25Q64 via QUADSPI memory-mapped window.            */
     /* Application is loaded by the bootloader at 0x08000000 which maps      */
     /* the QSPI flash here. See bootloader/src/w25q64.c.                     */
-    ROM (rx) : ORIGIN = 0x90000000, LENGTH =    8M /* W25Q64: 8MB */
-    RAM (rw) : ORIGIN = 0x20000000, LENGTH =  128k /* DTCM       */
+    ROM    (rx) : ORIGIN = 0x90000000, LENGTH =    8M /* W25Q64: 8MB              */
+    RAM    (rw) : ORIGIN = 0x20000000, LENGTH =  128k /* DTCM                     */
+
+    /* DMA-reachable RAM regions. Linker reserves .dma_buffer / .ram_d3 from */
+    /* the start of these so any future memheap (board.c::init_sram) can be  */
+    /* offset past the reserved bytes via _dma_buffer_end / _ram_d3_end.     */
+    RAM_D1 (rw) : ORIGIN = 0x24000000, LENGTH =  512k /* AXI SRAM, DMA1 reach     */
+    RAM_D3 (rw) : ORIGIN = 0x38000000, LENGTH =   64k /* SRAM4, BDMA reach        */
 }
 ENTRY(Reset_Handler)
 /* RT-Thread switches to per-thread stacks once scheduling starts, but the
@@ -129,6 +135,29 @@ SECTIONS
     __bss_end = .;
 
     _end = .;
+
+    /* DMA buffers placed in AXI SRAM (D2 domain, DMA1 reachable). NOLOAD    */
+    /* because contents are filled by DMA at runtime — no initialiser image. */
+    .dma_buffer (NOLOAD) :
+    {
+        . = ALIGN(32);
+        _dma_buffer_start = .;
+        *(.dma_buffer)
+        *(.dma_buffer.*)
+        . = ALIGN(32);
+        _dma_buffer_end = .;
+    } > RAM_D1
+
+    /* SRAM4 (D3 domain) — only DMA reachable from BDMA. ADC3 buffer lives here. */
+    .ram_d3 (NOLOAD) :
+    {
+        . = ALIGN(32);
+        _ram_d3_start = .;
+        *(.ram_d3)
+        *(.ram_d3.*)
+        . = ALIGN(32);
+        _ram_d3_end = .;
+    } > RAM_D3
 
     /* Stabs debugging sections.  */
     .stab          0 : { *(.stab) }
