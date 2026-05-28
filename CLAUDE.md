@@ -114,6 +114,53 @@ When a build silently hangs after `boot-flash` / `app-flash` / `reset`:
 
 `.agent/workflow/stm32h7-jlink-gdb-serial-closed-loop-debug.md` documents the full closed-loop debug protocol (J-Link + GDB + serial); `.agent/fixed/` accumulates root-cause writeups for past incidents — review before starting a new investigation in a similar area.
 
+## Testing
+
+The `test/` directory holds Python-based closed-loop test harnesses that drive
+the **actual board** over J-Link SWD, USB-TTL serial, and the ZQWL UCANFD-100C
+CAN box. All scripts use only the Python 3 standard library — no `pyserial` or
+other third-party deps.
+
+Reusable channel modules under `test/lib/`:
+
+- `jlink.py` — `JLinkExe -CommandFile` wrapper: `reset_run()`, `halt_and_regs()`, `read32_many(addrs)`.
+- `serial_term.py` — `Term.send_line()` (paced to ~25 char/s so finsh doesn't drop bytes), `Term.expect(regex, timeout)`.
+- `zqwl_can.py` — ZQWL vendor binary protocol: `ZqwlCan(path, bitrate_code).send(id, data)` / `recv(timeout)` / `raw_drain()`. `BITRATE_500K_CLASSIC = 0x25`.
+
+Per-feature cases under `test/cases/` are standalone executables using the
+autotools-style exit code convention: **0 = PASS, 1 = FAIL, 77 = SKIP**. Each
+case first probes its dependencies (`have_jlink()`, `serial_term.device_present()`,
+`zqwl_can.device_present()`) and emits SKIP when hardware is missing — so the
+suite degrades gracefully on a machine without the full rig connected.
+
+```
+python3 test/run_all.py             # run every case under test/cases/, summary table
+python3 test/cases/test_adc.py      # run one case in isolation
+```
+
+`test/run_all.py::CASE_ORDER` controls execution order; `test_swd.py` /
+`test_boot.py` reset the target first, later cases assume the app is already
+running and only drive msh.
+
+## Test-driven delivery
+
+**Every new feature, driver, or behaviour change must ship with a closed-loop
+case under `test/cases/` that exercises it end-to-end on real hardware** — and
+that case must PASS before the implementing commit lands. Add the case
+filename to `test/run_all.py::CASE_ORDER` so it runs by default.
+
+Loop: write a failing case → implement → case passes → commit (case + impl
+together, single commit). Don't ship driver code in one commit and tests in a
+follow-up — the case is the acceptance criterion, not an afterthought.
+
+Exemptions are allowed but must be explicit. If something genuinely cannot be
+closed-loop-tested — physical wiring sanity, ISR-latency budgets that can't be
+observed from PC side, third-party SDK plumbing that has no observable surface
+— call it out in the commit body with the phrase `test-exempt: <reason>`. CI /
+reviewers grep for that token. Hardware-availability-related SKIPs (no J-Link,
+no CAN box) are not exemptions — they're built into the harness and count as
+runs.
+
 ## Conventions
 
 - Toolchain is GCC-only (`PLATFORM = 'gcc'`, `CROSS_TOOL = 'gcc'`). The Keil/IAR branches in `rtconfig.py` were removed.
