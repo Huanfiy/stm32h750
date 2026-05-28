@@ -6,11 +6,20 @@
 /* Program Entry, set to mark it as "used" and avoid gc */
 MEMORY
 {
-    ROM (rx) : ORIGIN = 0x08020000, LENGTH = 1920k /* 1920KB flash */
-    RAM (rw) : ORIGIN = 0x20000000, LENGTH =  128k /* 128K DTCM */
+    /* XIP from external W25Q64 via QUADSPI memory-mapped window.            */
+    /* Application is loaded by the bootloader at 0x08000000 which maps      */
+    /* the QSPI flash here. See bootloader/src/w25q64.c.                     */
+    ROM (rx) : ORIGIN = 0x90000000, LENGTH =    8M /* W25Q64: 8MB */
+    RAM (rw) : ORIGIN = 0x20000000, LENGTH =  128k /* DTCM       */
 }
 ENTRY(Reset_Handler)
-_system_stack_size = 0x200;
+/* RT-Thread switches to per-thread stacks once scheduling starts, but the
+ * startup stack must accommodate HAL_Init + SystemClock_Config (which calls
+ * PeriphCommonClock_Config / HAL_RCCEx_PeriphCLKConfig / RCCEx_PLL2_Config /
+ * HAL_GetTick nested) -- empirically ~700 bytes. The previous 0x200 limit
+ * silently overflowed into the tail of .data (_object_container[Memory]),
+ * which then made rt_smem_init's RT_ASSERT(information != NULL) fail. */
+_system_stack_size = 0x800;
 
 SECTIONS
 {

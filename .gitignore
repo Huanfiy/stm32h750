@@ -42,7 +42,6 @@ compile_commands.json
 .claude/
 .codex/
 .worktrees/
-CLAUDE.md
 tmp/
 
 # RT-Thread generated (legacy root outputs)

@@ -1,0 +1,4 @@
+# Flashloader build artifacts (sources in tools/flashloader/ stay tracked).
+flashloader/*.FLM
+flashloader/*.o
+flashloader/*.elf

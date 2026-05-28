@@ -1,0 +1,28 @@
+<DataBase>
+  <!--
+    Custom device profile for STM32H750VB with an external W25Q64JV connected
+    to QUADSPI bank 1 using the pinout below. Pair with STM32H750VB_W25Q64.FLM
+    in this same directory.
+
+    Pins (must match bootloader/src/boot_qspi.c):
+        PB2  AF9   QSPI_CLK
+        PB6  AF10  QSPI_BK1_NCS
+        PD11 AF9   QSPI_BK1_IO0
+        PD12 AF9   QSPI_BK1_IO1
+        PE2  AF9   QSPI_BK1_IO2
+        PD13 AF9   QSPI_BK1_IO3
+  -->
+  <Device>
+    <ChipInfo Vendor="ST"
+              Name="STM32H750VB"
+              Core="JLINK_CORE_CORTEX_M7"
+              WorkRAMAddr="0x24000000"
+              WorkRAMSize="0x00080000" />
+    <FlashBankInfo Name="QSPI W25Q64JV"
+                   BaseAddr="0x90000000"
+                   MaxSize="0x00800000"
+                   Loader="STM32H750VB_W25Q64.FLM"
+                   LoaderType="FLASH_ALGO_TYPE_OPEN"
+                   AlwaysPresent="1" />
+  </Device>
+</DataBase>

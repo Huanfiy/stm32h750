@@ -77,11 +77,11 @@ def parse_linker_memory(ldscript_path):
         content = f.read()
 
     regions = {}
-    pattern = r'(\w+)\s*\([^)]*\)\s*:\s*ORIGIN\s*=\s*(?:0x[\da-fA-F]+|\d+)\s*,\s*LENGTH\s*=\s*(\d+)(K|M)?'
+    pattern = r'(\w+)\s*\([^)]*\)\s*:\s*ORIGIN\s*=\s*(?:0x[\da-fA-F]+|\d+)\s*,\s*LENGTH\s*=\s*(\d+)([KMkm])?'
     for m in re.finditer(pattern, content):
         name = m.group(1)
         length = int(m.group(2))
-        suffix = m.group(3)
+        suffix = (m.group(3) or '').upper()
         if suffix == 'K':
             length *= 1024
         elif suffix == 'M':

@@ -119,17 +119,73 @@ static int init_sram(void)
 INIT_BOARD_EXPORT(init_sram);
 #endif
 
-/**
- * Function    ota_app_vtor_reconfig
- * Description Set Vector Table base location to the start addr of app(RT_APP_PART_ADDR).
-*/
-static int ota_app_vtor_reconfig(void)
+/* MPU region 0 covers the QSPI XIP window so the CPU can fetch & cache code
+ * from external W25Q64 efficiently. The bootloader already sets this up
+ * before jumping, but configure it here too so a soft reset or
+ * direct-to-app debug session still gets the right attributes. */
+static void mpu_config_qspi_xip(void)
 {
-    #define RT_APP_PART_ADDR 0x08020000
-    #define NVIC_VTOR_MASK   0x3FFFFF80
-    /* Set the Vector Table base location by user application firmware definition */
-    SCB->VTOR = RT_APP_PART_ADDR & NVIC_VTOR_MASK;
+    MPU_Region_InitTypeDef region = {0};
 
-    return 0;
+    HAL_MPU_Disable();
+
+    region.Enable           = MPU_REGION_ENABLE;
+    region.Number           = MPU_REGION_NUMBER0;
+    region.BaseAddress      = ROM_START;
+    region.Size             = MPU_REGION_SIZE_8MB;
+    region.AccessPermission = MPU_REGION_FULL_ACCESS;
+    region.IsBufferable     = MPU_ACCESS_BUFFERABLE;
+    region.IsCacheable      = MPU_ACCESS_CACHEABLE;
+    region.IsShareable      = MPU_ACCESS_NOT_SHAREABLE;
+    region.TypeExtField     = MPU_TEX_LEVEL1;
+    region.SubRegionDisable = 0x00;
+    region.DisableExec      = MPU_INSTRUCTION_ACCESS_ENABLE;
+    HAL_MPU_ConfigRegion(&region);
+
+    HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
 }
-// INIT_BOARD_EXPORT(ota_app_vtor_reconfig);
+
+/* Override the rt_weak rt_hw_board_init in drv_common.c. Identical body
+ * except for the MPU + VTOR fixup that has to run before HAL_Init() (which
+ * enables SysTick and from then on needs the right vector table). */
+void rt_hw_board_init(void)
+{
+    mpu_config_qspi_xip();
+
+    /* Relocate the vector table to the start of the QSPI XIP image. */
+    SCB->VTOR = ROM_START;
+    __DSB();
+    __ISB();
+
+#ifdef BSP_SCB_ENABLE_I_CACHE
+    SCB_EnableICache();
+#endif
+
+#ifdef BSP_SCB_ENABLE_D_CACHE
+    SCB_EnableDCache();
+#endif
+
+    HAL_Init();
+    SystemClock_Config();
+
+#if defined(RT_USING_HEAP)
+    rt_system_heap_init((void *)HEAP_BEGIN, (void *)HEAP_END);
+#endif
+
+#ifdef RT_USING_PIN
+    rt_hw_pin_init();
+#endif
+
+#ifdef RT_USING_SERIAL
+    extern int rt_hw_usart_init(void);
+    rt_hw_usart_init();
+#endif
+
+#if defined(RT_USING_CONSOLE) && defined(RT_USING_DEVICE)
+    rt_console_set_device(RT_CONSOLE_DEVICE_NAME);
+#endif
+
+#ifdef RT_USING_COMPONENTS_INIT
+    rt_components_board_init();
+#endif
+}

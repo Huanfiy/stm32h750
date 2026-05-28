@@ -1,0 +1,44 @@
+/*
+ * J-Link script: STM32H7 SW-DP power-up.
+ *
+ * Built-in STM32H750VB device profiles in J-Link do this implicitly, but a
+ * custom device declared via JLinkDevices.xml lacks the per-vendor setup
+ * sequence and therefore fails with "Failed to power up DAP" right after
+ * `connect`. This script supplies the missing steps:
+ *   1. ABORT any in-flight transaction.
+ *   2. Issue CDBGPWRUPREQ + CSYSPWRUPREQ.
+ *   3. Wait for the corresponding ACK bits.
+ */
+
+int InitTarget(void) {
+    int v;
+    int i;
+
+    Report("STM32H7 W25Q64 custom: bringing up SW-DP debug power...");
+
+    JLINK_CORESIGHT_Configure("");
+
+    // Clear any stale sticky errors via ABORT (DP reg 0)
+    JLINK_CORESIGHT_WriteDP(0, 0x1E);
+
+    // Read CTRL/STAT (DP reg 1)
+    v = JLINK_CORESIGHT_ReadDP(1);
+
+    // Set CDBGPWRUPREQ (bit 28) and CSYSPWRUPREQ (bit 30)
+    v = v | (1 << 28) | (1 << 30);
+    JLINK_CORESIGHT_WriteDP(1, v);
+
+    // Wait for ACK: CDBGPWRUPACK (bit 29) + CSYSPWRUPACK (bit 31)
+    i = 0;
+    do {
+        v = JLINK_CORESIGHT_ReadDP(1);
+        i = i + 1;
+        if (i > 100) {
+            Report("DAP power-up ACK timed out");
+            return -1;
+        }
+    } while ((v & ((1 << 29) | (1 << 31))) != ((1 << 29) | (1 << 31)));
+
+    Report("SW-DP power-up complete.");
+    return 0;
+}

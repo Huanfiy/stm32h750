@@ -10,8 +10,21 @@ readonly JLINK_INTF="SWD"
 readonly JLINK_SPEED="4000"
 readonly FLASH_ADDR="0x08000000"
 readonly BUILD_DIR="build"
-readonly ELF_FILE="${BUILD_DIR}/rtthread.elf"
-readonly BIN_FILE="${BUILD_DIR}/rtthread.bin"
+readonly PROJECT_NAME="${PROJECT_NAME:-rt-thread}"
+readonly ELF_FILE="${BUILD_DIR}/${PROJECT_NAME}.elf"
+readonly BIN_FILE="${BUILD_DIR}/${PROJECT_NAME}.bin"
+
+readonly BOOT_DIR="bootloader"
+readonly BOOT_BUILD_DIR="${BOOT_DIR}/build_boot"
+readonly BOOT_ELF_FILE="${BOOT_BUILD_DIR}/bootloader.elf"
+readonly BOOT_BIN_FILE="${BOOT_BUILD_DIR}/bootloader.bin"
+
+readonly APP_FLASH_ADDR="0x90000000"
+# QSPI flash bank is merged into the built-in STM32H750VB device profile via
+# ~/.config/SEGGER/JLinkDevices/Custom/STM32H750VB_W25Q64/JLinkDevices.xml. The
+# device name therefore stays the same as the bootloader -- only the second
+# flash bank loader changes.
+readonly APP_JLINK_DEVICE="$JLINK_DEVICE"
 
 readonly R='\033[0;31m'
 readonly G='\033[0;32m'
@@ -100,6 +113,94 @@ EOF
     rm -f "$jlink_script"
 }
 
+cmd_app_flash() {
+    [[ -f "$BIN_FILE" ]] || die "$BIN_FILE not found. Run 'build' first."
+
+    local devfile="$HOME/.config/SEGGER/JLinkDevices/Custom/STM32H750VB_W25Q64/STM32H750VB_W25Q64.FLM"
+    [[ -f "$devfile" ]] || die "$devfile not found. Run 'make -C tools/flashloader install' first."
+
+    log_info "Flashing $BIN_FILE to $APP_FLASH_ADDR (W25Q64 via custom Open Flashloader)..."
+
+    local jlink_script
+    jlink_script=$(mktemp)
+    cat > "$jlink_script" <<EOF
+si $JLINK_INTF
+speed $JLINK_SPEED
+device $APP_JLINK_DEVICE
+connect
+h
+loadbin $BIN_FILE, $APP_FLASH_ADDR
+exit
+EOF
+
+    JLinkExe -AutoConnect 1 -ExitOnError 1 -CommandFile "$jlink_script" > /tmp/app-flash.log 2>&1
+    rm -f "$jlink_script"
+
+    if grep -qi "verification failed\|flashing failed\|error:" /tmp/app-flash.log; then
+        tail -25 /tmp/app-flash.log
+        die "App flash to QSPI failed -- see /tmp/app-flash.log."
+    fi
+
+    if grep -qE "Flash download: Bank|Contents already match" /tmp/app-flash.log; then
+        log_success "App flash to QSPI complete."
+        grep -E "Flash download:|Contents already match" /tmp/app-flash.log | sed 's/^/    /'
+    else
+        tail -25 /tmp/app-flash.log
+        die "App flash result unclear -- see /tmp/app-flash.log."
+    fi
+}
+
+cmd_boot_build() {
+    check_toolchain
+
+    local scons_args=(-j$(nproc) -Q)
+    if [[ "$VERBOSE" -eq 0 ]]; then
+        scons_args+=("--silent")
+    fi
+
+    log_info "Building bootloader..."
+    (cd "$BOOT_DIR" && scons "${scons_args[@]}")
+    local rc=$?
+    [[ $rc -ne 0 ]] && die "Bootloader build failed."
+    log_success "Bootloader build complete: $BOOT_BIN_FILE"
+}
+
+cmd_boot_clean() {
+    check_toolchain
+    log_info "Cleaning bootloader..."
+    (cd "$BOOT_DIR" && scons -c -Q)
+    rm -rf "$BOOT_BUILD_DIR"
+    log_success "Bootloader clean complete."
+}
+
+cmd_boot_flash() {
+    [[ -f "$BOOT_BIN_FILE" ]] || die "$BOOT_BIN_FILE not found. Run 'boot-build' first."
+
+    log_info "Flashing $BOOT_BIN_FILE to $FLASH_ADDR via J-Link $JLINK_INTF..."
+
+    local jlink_script
+    jlink_script=$(mktemp)
+    cat > "$jlink_script" <<EOF
+si $JLINK_INTF
+speed $JLINK_SPEED
+device $JLINK_DEVICE
+connect
+h
+loadbin $BOOT_BIN_FILE, $FLASH_ADDR
+r
+g
+exit
+EOF
+
+    if JLinkExe -AutoConnect 1 -ExitOnError 1 -CommandFile "$jlink_script" > /dev/null 2>&1; then
+        log_success "Bootloader flash complete."
+    else
+        rm -f "$jlink_script"
+        die "Bootloader flash failed."
+    fi
+    rm -f "$jlink_script"
+}
+
 cmd_reset() {
     log_info "Resetting target..."
 
@@ -125,13 +226,20 @@ show_help() {
 Usage: $0 <command> [options]
 
 Commands:
-  build         Build firmware (scons)
-  clean         Clean build artifacts
-  flash         Flash $BIN_FILE via J-Link SWD
-  reset         Reset target via J-Link
-  rebuild       Clean + build
-  rebuild-flash Clean + build + flash
-  help          Show this help
+  build              Build firmware (scons)
+  clean              Clean build artifacts
+  flash              Flash $BIN_FILE to $FLASH_ADDR (internal flash; legacy)
+  reset              Reset target via J-Link
+  rebuild            Clean + build
+  rebuild-flash      Clean + build + flash (internal flash; legacy)
+  app-flash          Flash $BIN_FILE to $APP_FLASH_ADDR (external W25Q64)
+  app-rebuild-flash  Clean + build + app-flash
+  boot-build         Build bootloader ($BOOT_BIN_FILE)
+  boot-clean         Clean bootloader artifacts
+  boot-flash         Flash $BOOT_BIN_FILE to $FLASH_ADDR (internal flash)
+  boot-rebuild       Clean + build bootloader
+  boot-rebuild-flash Clean + build + flash bootloader
+  help               Show this help
 
 Options:
   --verbose, -v   Show full SCons output
@@ -154,14 +262,21 @@ main() {
     done
 
     case "$cmd" in
-        build)          cmd_build ;;
-        clean)          cmd_clean ;;
-        flash)          cmd_flash ;;
-        reset)          cmd_reset ;;
-        rebuild)        cmd_clean; cmd_build ;;
-        rebuild-flash)  cmd_clean; cmd_build; cmd_flash ;;
-        help|--help|-h) show_help ;;
-        *)              die "Unknown command: $cmd" ;;
+        build)               cmd_build ;;
+        clean)               cmd_clean ;;
+        flash)               cmd_flash ;;
+        reset)               cmd_reset ;;
+        rebuild)             cmd_clean; cmd_build ;;
+        rebuild-flash)       cmd_clean; cmd_build; cmd_flash ;;
+        app-flash)           cmd_app_flash ;;
+        app-rebuild-flash)   cmd_clean; cmd_build; cmd_app_flash ;;
+        boot-build)          cmd_boot_build ;;
+        boot-clean)          cmd_boot_clean ;;
+        boot-flash)          cmd_boot_flash ;;
+        boot-rebuild)        cmd_boot_clean; cmd_boot_build ;;
+        boot-rebuild-flash)  cmd_boot_clean; cmd_boot_build; cmd_boot_flash ;;
+        help|--help|-h)      show_help ;;
+        *)                   die "Unknown command: $cmd" ;;
     esac
 }
 
