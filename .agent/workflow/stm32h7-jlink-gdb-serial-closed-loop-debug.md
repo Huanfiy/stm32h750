@@ -56,13 +56,13 @@ sed -n '1,220p' bootloader/linker_scripts/boot.lds
 检查段布局：
 
 ```bash
-arm-none-eabi-objdump -h bootloader/build_boot/bootloader.elf
+arm-none-eabi-objdump -h bootloader/build/bootloader.elf
 ```
 
 检查关键符号：
 
 ```bash
-arm-none-eabi-nm -n bootloader/build_boot/bootloader.elf \
+arm-none-eabi-nm -n bootloader/build/bootloader.elf \
   | rg 'Reset_Handler| main$|entry$|boot_uart_init|SystemClock_Config|Error_Handler|_init$|_fini$|__init_array'
 ```
 
@@ -72,7 +72,7 @@ arm-none-eabi-nm -n bootloader/build_boot/bootloader.elf \
 arm-none-eabi-objdump -s -j .text \
   --start-address=0x08000000 \
   --stop-address=0x08000100 \
-  bootloader/build_boot/bootloader.elf
+  bootloader/build/bootloader.elf
 ```
 
 可接受现象：
@@ -175,8 +175,8 @@ SP+1C xPSR
 定位真实触发地址：
 
 ```bash
-arm-none-eabi-addr2line -e bootloader/build_boot/bootloader.elf -f -C <stacked_lr> <stacked_pc>
-arm-none-eabi-objdump -d --start-address=<addr_before> --stop-address=<addr_after> bootloader/build_boot/bootloader.elf
+arm-none-eabi-addr2line -e bootloader/build/bootloader.elf -f -C <stacked_lr> <stacked_pc>
+arm-none-eabi-objdump -d --start-address=<addr_before> --stop-address=<addr_after> bootloader/build/bootloader.elf
 ```
 
 ## 7. 使用 GDB 交互调试
@@ -190,7 +190,7 @@ JLinkGDBServerCLExe -device STM32H750VB -if SWD -speed 4000 -port 2331 -nogui
 另一个终端进入 GDB：
 
 ```bash
-arm-none-eabi-gdb bootloader/build_boot/bootloader.elf
+arm-none-eabi-gdb bootloader/build/bootloader.elf
 ```
 
 GDB 命令：

@@ -38,7 +38,7 @@ stacked xPSR = 41000000
 地址解析：
 
 ```bash
-arm-none-eabi-addr2line -e bootloader/build_boot/bootloader.elf -f -C 0x0800360c 0x080041f4
+arm-none-eabi-addr2line -e bootloader/build/bootloader.elf -f -C 0x0800360c 0x080041f4
 ```
 
 结果显示 `0x0800360c` 位于 `__libc_init_array`，`0x080041f4` 已落入非代码区域。

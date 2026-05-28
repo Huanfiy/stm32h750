@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 RT-Thread 5.2.0 BSP for STM32H750VBT6 (Cortex-M7 @ 480 MHz), the MCU for the Smart B-pillar aging-test fixture. Two **independently built** firmware images cooperate at runtime:
 
-- **Bootloader** (`bootloader/`, own `SConstruct`/`rtconfig.py`/`linker_scripts/boot.lds`). Bare HAL, ~17 KB. Lives in **internal flash @ 0x08000000** (128 KB region). On reset it brings up QSPI W25Q64 in 1-4-4 memory-mapped mode and jumps to `APP_BASE_ADDR = 0x90000000`.
+- **Bootloader** (`bootloader/`, own `Makefile` + `linker_scripts/boot.lds`). Bare HAL, ~17 KB. Lives in **internal flash @ 0x08000000** (128 KB region). On reset it brings up QSPI W25Q64 in 1-4-4 memory-mapped mode and jumps to `APP_BASE_ADDR = 0x90000000`.
 - **Main app** (root `SConstruct`). Full RT-Thread kernel + HAL drivers + finsh shell. Lives in **external W25Q64 @ 0x90000000** (8 MB QSPI XIP); `.data`/`.bss`/.stack stay in DTCM (`0x20000000`/128 KB). `Reset_Handler` copies `.data` from QSPI to DTCM and zeros `.bss` like a normal Cortex-M boot — the only QSPI-specific tweak is `SCB->VTOR = 0x90000000` and an MPU region (done in `board.c::rt_hw_board_init`).
 
 Both images are flashed via J-Link. Internal-flash and QSPI-flash slots are **separate** — `boot-flash` and `app-flash` never overwrite each other.
@@ -34,7 +34,7 @@ Everything goes through `run.sh` (do not call `scons` directly unless debugging 
 ./run.sh rebuild[-flash]
 
 # Bootloader (internal flash)
-./run.sh boot-build         # builds bootloader/ (separate SConstruct), output bootloader/build_boot/bootloader.{elf,bin}
+./run.sh boot-build         # make -C bootloader -j$(nproc), output bootloader/build/bootloader.{elf,bin}
 ./run.sh boot-clean
 ./run.sh boot-flash         # flashes bootloader.bin → 0x08000000
 ./run.sh boot-rebuild[-flash]
@@ -88,7 +88,7 @@ The dead `ota_app_vtor_reconfig` helper has been removed.
 
 `bootloader/src/main.c` flow: MPU config (mark `0x90000000`+8 MB as Normal/Cacheable for XIP) → `HAL_Init` → 480 MHz PLL → UART1 log → QSPI init → `w25q64_reset` (covers stuck-in-QPI warm boots, but not from QPI itself — that requires a power cycle) → JEDEC check (`0xEF4017`, hard-fail gated by `BOOT_REQUIRE_JEDEC_OK` in `inc/boot_config.h`) → set QE → memory-map (1-4-4, `0xEB` Fast Read Quad I/O with mode-byte = `0xF0`) → sanity-check app SP/PC (SP in DTCM range, PC in QSPI range with thumb bit set) → `SCB->VTOR` + `__set_MSP` + jump.
 
-The bootloader's `SConstruct` is **standalone** — do not invoke it from the root `SConstruct`. It picks a minimal HAL module list (UART/QSPI/RCC/PWR/GPIO/DMA/MDMA/EXTI/CORTEX) and links against `bootloader/linker_scripts/boot.lds` (128 KB ROM / 128 KB DTCM, 2 KB main stack, full `.init`/`.fini`/`.preinit_array`/`.init_array`/`.fini_array` so `__libc_init_array` returns cleanly — see `.agent/fixed/2026-05-28-bootloader-hardfault-no-uart.md`).
+The bootloader's `Makefile` is **standalone** — it does not share build state with the root `SConstruct`. It picks a minimal HAL module list (UART/QSPI/RCC/PWR/GPIO/DMA/MDMA/EXTI/CORTEX) and links against `bootloader/linker_scripts/boot.lds` (128 KB ROM / 128 KB DTCM, 2 KB main stack, full `.init`/`.fini`/`.preinit_array`/`.init_array`/`.fini_array` so `__libc_init_array` returns cleanly — see `.agent/fixed/2026-05-28-bootloader-hardfault-no-uart.md`). The Makefile mirrors the layout of `tools/flashloader/Makefile` so all "small bare-metal" build products in the repo share one engine.
 
 The RT-Thread-patched `startup_stm32h750xx.s` jumps to `entry` (RT-Thread internal symbol), not `main`. `bootloader/src/stubs.c` supplies a trampoline `int entry(void) { return main(); }` so the same startup file can drive a non-RT-Thread image.
 
@@ -120,5 +120,5 @@ When a build silently hangs after `boot-flash` / `app-flash` / `reset`:
 - `RT_NAME_MAX = 8` — RT-Thread object names (threads, semaphores, devices) truncate at 8 chars.
 - All board-level peripheral enables go through `board/Kconfig`'s `BSP_USING_*` flags; the underlying `RT_USING_*` Components flags are `select`ed from there. Don't toggle the `RT_USING_*` ones directly when adding a peripheral — flip the BSP flag and let Kconfig propagate.
 - The flash/debug device string is `STM32H750VB` for J-Link CLI (both `boot-flash` and `app-flash`), `STM32H750VBTx` for cortex-debug (`.vscode/launch.json`). Don't unify them — the two tools expect different forms.
-- `bootloader/` and `tools/flashloader/` are independent builds; **never** add them to the root `SConstruct` — the root build must remain a pure RT-Thread app build.
+- `bootloader/` and `tools/flashloader/` are independent Make-based builds; **never** add them to the root `SConstruct` (and never let the root `SConstruct`'s subdir-scanning logic in `board/SConscript` reach them either — it auto-pulls any nested `SConscript`, which would multiple-define `main` / `HAL_QSPI_MspInit` / `FlashDevice`).
 - The user-level J-Link `JLinkDevices.xml` lives outside the repo (`~/.config/SEGGER/JLinkDevices/Custom/`). The source of truth is `tools/flashloader/JLinkDevices.xml`; sync via `make -C tools/flashloader install`. On a fresh machine, `./run.sh app-flash` will fail until that's done.

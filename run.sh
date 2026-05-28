@@ -15,7 +15,7 @@ readonly ELF_FILE="${BUILD_DIR}/${PROJECT_NAME}.elf"
 readonly BIN_FILE="${BUILD_DIR}/${PROJECT_NAME}.bin"
 
 readonly BOOT_DIR="bootloader"
-readonly BOOT_BUILD_DIR="${BOOT_DIR}/build_boot"
+readonly BOOT_BUILD_DIR="${BOOT_DIR}/build"
 readonly BOOT_ELF_FILE="${BOOT_BUILD_DIR}/bootloader.elf"
 readonly BOOT_BIN_FILE="${BOOT_BUILD_DIR}/bootloader.bin"
 
@@ -153,23 +153,21 @@ EOF
 cmd_boot_build() {
     check_toolchain
 
-    local scons_args=(-j$(nproc) -Q)
+    local make_args=(-C "$BOOT_DIR" -j"$(nproc)")
     if [[ "$VERBOSE" -eq 0 ]]; then
-        scons_args+=("--silent")
+        make_args+=(--no-print-directory -s)
     fi
 
     log_info "Building bootloader..."
-    (cd "$BOOT_DIR" && scons "${scons_args[@]}")
+    make "${make_args[@]}"
     local rc=$?
     [[ $rc -ne 0 ]] && die "Bootloader build failed."
     log_success "Bootloader build complete: $BOOT_BIN_FILE"
 }
 
 cmd_boot_clean() {
-    check_toolchain
     log_info "Cleaning bootloader..."
-    (cd "$BOOT_DIR" && scons -c -Q)
-    rm -rf "$BOOT_BUILD_DIR"
+    make -C "$BOOT_DIR" clean --no-print-directory
     log_success "Bootloader clean complete."
 }
 
