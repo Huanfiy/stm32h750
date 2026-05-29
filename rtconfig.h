@@ -106,6 +106,7 @@
 #define RT_USING_HEAP
 /* end of Memory Management */
 #define RT_USING_DEVICE
+#define RT_USING_DEVICE_OPS
 #define RT_USING_CONSOLE
 #define RT_CONSOLEBUF_SIZE 128
 #define RT_CONSOLE_DEVICE_NAME "uart1"
@@ -146,9 +147,23 @@
 #define DFS_USING_POSIX
 #define DFS_USING_WORKDIR
 #define DFS_FD_MAX 16
-#define RT_USING_DFS_V1
-#define DFS_FILESYSTEMS_MAX 4
-#define DFS_FILESYSTEM_TYPES_MAX 4
+#define RT_USING_DFS_V2
+#define RT_USING_DFS_ELMFAT
+
+/* elm-chan's FatFs, Generic FAT Filesystem Module */
+
+#define RT_DFS_ELM_CODE_PAGE 437
+#define RT_DFS_ELM_WORD_ACCESS
+#define RT_DFS_ELM_USE_LFN_3
+#define RT_DFS_ELM_USE_LFN 3
+#define RT_DFS_ELM_LFN_UNICODE_0
+#define RT_DFS_ELM_LFN_UNICODE 0
+#define RT_DFS_ELM_MAX_LFN 255
+#define RT_DFS_ELM_DRIVES 2
+#define RT_DFS_ELM_MAX_SECTOR_SIZE 512
+#define RT_DFS_ELM_REENTRANT
+#define RT_DFS_ELM_MUTEX_TIMEOUT 3000
+/* end of elm-chan's FatFs, Generic FAT Filesystem Module */
 #define RT_USING_DFS_DEVFS
 /* end of DFS: device virtual file system */
 
@@ -327,6 +342,10 @@
 
 /* end of Kendryte SDK */
 
+/* MM32 HAL & SDK Drivers */
+
+/* end of MM32 HAL & SDK Drivers */
+
 /* WCH HAL & SDK Drivers */
 
 /* end of WCH HAL & SDK Drivers */
@@ -350,6 +369,18 @@
 /* GD32 Drivers */
 
 /* end of GD32 Drivers */
+
+/* HPMicro SDK */
+
+/* end of HPMicro SDK */
+
+/* FT32 HAL & SDK Drivers */
+
+/* end of FT32 HAL & SDK Drivers */
+
+/* NOVOSNS Drivers */
+
+/* end of NOVOSNS Drivers */
 /* end of HAL & SDK Drivers */
 
 /* sensors drivers */

@@ -18,6 +18,7 @@
 #endif
 
 #include "drv_sdmmc.h"
+#include "drv_config.h"   /* exposes SDIO_USING_1_BIT etc. from h7/sdio_config.h */
 
 #define DBG_TAG              "drv.sdmmc"
 #ifdef DRV_DEBUG
