@@ -7,7 +7,7 @@ set -o pipefail
 readonly RTT_EXEC_PATH="${RTT_EXEC_PATH:-$HOME/toolchain/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi/bin}"
 readonly JLINK_DEVICE="STM32H750VB"
 readonly JLINK_INTF="SWD"
-readonly JLINK_SPEED="4000"
+readonly JLINK_SPEED="${JLINK_SPEED:-8000}"
 readonly FLASH_ADDR="0x08000000"
 readonly BUILD_DIR="build"
 readonly PROJECT_NAME="${PROJECT_NAME:-rt-thread}"

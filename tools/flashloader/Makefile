@@ -24,7 +24,7 @@ $(OUT): $(SRC) flashloader.lds
 	@echo "--- Sections ---"
 	@$(OBJDUMP) -h $@ | grep -E "PrgCode|PrgData|DevDscr"
 	@echo "--- Symbols ---"
-	@$(NM) $@ | grep -E "Init|UnInit|EraseSector|EraseChip|ProgramPage|FlashDevice|BlankCheck"
+	@$(NM) $@ | grep -E "Init|UnInit|EraseSector|EraseChip|ProgramPage|SEGGER_OPEN_Read|FlashDevice|BlankCheck"
 
 JLINK_USER_DIR := $(HOME)/.config/SEGGER/JLinkDevices/Custom/STM32H750VB_W25Q64
 

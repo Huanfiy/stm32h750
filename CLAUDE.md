@@ -16,7 +16,7 @@ Both images are flashed via J-Link. Internal-flash and QSPI-flash slots are **se
 - `RTT_ROOT` (env) — RT-Thread kernel checkout. The user's shell exports `~/SDK/rt-thread`. `SConstruct` falls back to `../../..` which is wrong on this machine; do not rely on the fallback.
 - `RTT_EXEC_PATH` (env, optional) — toolchain bin dir. Defaults in `run.sh` to `~/toolchain/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi/bin`. Must contain `arm-none-eabi-*`.
 - `BUILD_MODE` (env) — `Debug` (default, `-O0 -g`) or `Release` (`-O2 -DNDEBUG`). Read by `rtconfig.py`.
-- `JLinkExe` on `PATH`, device `STM32H750VB`, SWD @ 4 MHz. **No OpenOCD path** — OpenOCD's `jlink` driver hangs on H7 DAP setup.
+- `JLinkExe` on `PATH`, device `STM32H750VB`, SWD @ 8 MHz by default (`JLINK_SPEED=4000` can be used to fall back). **No OpenOCD path** — OpenOCD's `jlink` driver hangs on H7 DAP setup.
 - **Custom J-Link device profile** at `~/.config/SEGGER/JLinkDevices/Custom/STM32H750VB_W25Q64/`. Installed by `make -C tools/flashloader install`. Overrides the built-in `STM32H750VB` profile's QSPI bank with a W25Q64-aware Open Flashloader; internal-flash bank stays on the built-in algorithm. **The user-level XML must use `Name="STM32H750VB"` (same as the built-in)** — using a new name causes J-Link to skip the H7-specific connect sequence and fail at "Failed to power up DAP".
 
 ## Commands
@@ -97,7 +97,7 @@ The RT-Thread-patched `startup_stm32h750xx.s` jumps to `entry` (RT-Thread intern
 `tools/flashloader/` is a third standalone build product, separate from both bootloader and main app:
 
 - `FlashPrg.c` — `Init/UnInit/EraseSector/EraseChip/ProgramPage/BlankCheck/SEGGER_OPEN_Read`, raw QUADSPI register pokes only (no HAL, no libc). Runs in AXI-SRAM `0x24000000` when J-Link loads it.
-- `FlashDev.c` — `FlashDevice` struct describing W25Q64JV (base `0x90000000`, 8 MB, 4 KB sectors, 256 B page).
+- `FlashDev.c` — `FlashDevice` struct describing W25Q64JV (base `0x90000000`, 8 MB, 64 KB erase blocks, 4 KB J-Link program chunks split internally into 256 B physical pages).
 - `flashloader.lds` — links into `RAM(rwx) 0x24000000 / 32 KB`. Uses `EXTERN(Init UnInit EraseSector EraseChip ProgramPage BlankCheck SEGGER_OPEN_Read FlashDevice)` plus per-function `__attribute__((used))` so `--gc-sections` does not drop J-Link's entry points.
 - `JLinkDevices.xml` — `ChipInfo Name="STM32H750VB"` (same as built-in!), `FlashBankInfo Loader="STM32H750VB_W25Q64.FLM" LoaderType="FLASH_ALGO_TYPE_OPEN"`.
 - `Makefile` — `make` builds the .FLM, `make install` copies the .FLM + XML to `~/.config/SEGGER/JLinkDevices/Custom/STM32H750VB_W25Q64/`.

@@ -58,5 +58,6 @@ int EraseSector (U32 adr)                   KEPT;
 int ProgramPage (U32 adr, U32 sz, U8 *buf)  KEPT;
 int EraseChip   (void)                      KEPT;
 int BlankCheck  (U32 adr, U32 sz, U8 pat)   KEPT;
+int SEGGER_OPEN_Read    (U32 adr, U32 sz, U8 *buf)                 KEPT;
 
 #endif /* FLASH_OS_H */

@@ -1,6 +1,7 @@
 /*
- * Open Flashloader implementation for STM32H750 + W25Q64JV (1-line SPI
- * commands via QUADSPI indirect mode). Pin mapping matches the bootloader.
+ * Open Flashloader implementation for STM32H750 + W25Q64JV. Pin mapping
+ * matches the bootloader; readback uses 1-4-4 memory-mapped QSPI, programming
+ * uses 1-1-4 quad input page program.
  *
  * NOTE: J-Link executes this image from AXI-SRAM. No HAL, no libc, no
  * interrupts. Direct register pokes only.
@@ -29,6 +30,7 @@
 #define QSPI_DLR        (*(volatile U32 *)(QSPI_BASE + 0x10))
 #define QSPI_CCR        (*(volatile U32 *)(QSPI_BASE + 0x14))
 #define QSPI_AR         (*(volatile U32 *)(QSPI_BASE + 0x18))
+#define QSPI_ABR        (*(volatile U32 *)(QSPI_BASE + 0x1C))
 #define QSPI_DR         (*(volatile U32 *)(QSPI_BASE + 0x20))
 #define QSPI_DR_BYTE    (*(volatile U8  *)(QSPI_BASE + 0x20))
 
@@ -36,14 +38,21 @@
 #define SR_FTF          (1U << 2)
 #define SR_TCF          (1U << 1)
 #define SR_TEF          (1U << 0)
+#define SR_FLEVEL_MASK  (0x1FU << 8)
+#define SR_FLEVEL_SHIFT 8
 
 /* CCR fields */
 #define CCR_FMODE_WR    (0U << 26)
 #define CCR_FMODE_RD    (1U << 26)
+#define CCR_FMODE_MM    (3U << 26)
 #define CCR_DMODE_1L    (1U << 24)
+#define CCR_DMODE_4L    (3U << 24)
 #define CCR_DCYC(n)     (((U32)(n) & 0x1F) << 18)
+#define CCR_ABSIZE_8    (0U << 16)
+#define CCR_ABMODE_4L   (3U << 14)
 #define CCR_ADSIZE_24   (2U << 12)
 #define CCR_ADMODE_1L   (1U << 10)
+#define CCR_ADMODE_4L   (3U << 10)
 #define CCR_IMODE_1L    (1U << 8)
 
 /* W25Q opcodes */
@@ -54,13 +63,16 @@
 #define CMD_JEDEC       0x9F
 #define CMD_RST_EN      0x66
 #define CMD_RST         0x99
-#define CMD_PP          0x02    /* 1-1-1 page program, 256 B */
-#define CMD_SE_4K       0x20    /* sector erase, 4 KB */
+#define CMD_QPP         0x32    /* 1-1-4 quad input page program, 256 B */
+#define CMD_BE_64K      0xD8    /* block erase, 64 KB */
 #define CMD_CE          0xC7    /* chip erase */
+#define CMD_FAST_4IO    0xEB    /* 1-4-4 fast read quad I/O */
 
 #define SR2_QE          (1U << 1)
 
 /* ---------- Helpers ---------- */
+static U32 qspi_mmap_active;
+
 static void qspi_wait_busy(void)
 {
     while (QSPI_SR & SR_BUSY) { }
@@ -71,9 +83,35 @@ static void qspi_clear_flags(void)
     QSPI_FCR = SR_TCF | SR_TEF;
 }
 
+static void qspi_abort(void)
+{
+    QSPI_CR |= (1U << 1);
+    while (QSPI_CR & (1U << 1)) { }
+    qspi_clear_flags();
+    qspi_mmap_active = 0;
+}
+
+static void qspi_prepare_indirect(void)
+{
+    if (qspi_mmap_active) {
+        qspi_abort();
+    }
+}
+
+static U32 qspi_fifo_level(void)
+{
+    return (QSPI_SR & SR_FLEVEL_MASK) >> SR_FLEVEL_SHIFT;
+}
+
+static U32 load_le32(const U8 *p)
+{
+    return ((U32)p[0]) | ((U32)p[1] << 8) | ((U32)p[2] << 16) | ((U32)p[3] << 24);
+}
+
 /* Send a command with no address and no data. */
 static int qspi_cmd(U8 opcode)
 {
+    qspi_prepare_indirect();
     qspi_wait_busy();
     qspi_clear_flags();
     QSPI_CCR = CCR_FMODE_WR | CCR_IMODE_1L | opcode;
@@ -84,24 +122,35 @@ static int qspi_cmd(U8 opcode)
     return 0;
 }
 
-/* Send opcode + address (24-bit) + optional 1-line data write. len <= 256. */
-static int qspi_cmd_addr_write(U8 opcode, U32 addr, const U8 *data, U32 len)
+/* Send opcode + address (24-bit) + optional data write. len <= 256. */
+static int qspi_cmd_addr_write(U8 opcode, U32 addr, const U8 *data, U32 len, U32 data_mode)
 {
+    qspi_prepare_indirect();
     qspi_wait_busy();
     qspi_clear_flags();
 
     U32 ccr = CCR_FMODE_WR | CCR_IMODE_1L | CCR_ADMODE_1L | CCR_ADSIZE_24 | opcode;
     if (len) {
-        ccr |= CCR_DMODE_1L;
+        ccr |= data_mode;
         QSPI_DLR = len - 1;
     }
     QSPI_CCR = ccr;
     QSPI_AR  = addr;
-    for (U32 i = 0; i < len; i++) {
-        while (!(QSPI_SR & SR_FTF)) {
+
+    U32 i = 0;
+    while (i + 4 <= len) {
+        while (qspi_fifo_level() > 28U) {
+            if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -2; }
+        }
+        QSPI_DR = load_le32(data + i);
+        i += 4;
+    }
+    while (i < len) {
+        while (qspi_fifo_level() >= 32U) {
             if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -2; }
         }
         QSPI_DR_BYTE = data[i];
+        i++;
     }
     while (!(QSPI_SR & SR_TCF)) {
         if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -3; }
@@ -113,6 +162,7 @@ static int qspi_cmd_addr_write(U8 opcode, U32 addr, const U8 *data, U32 len)
 /* Read register-style: opcode + N data bytes. */
 static int qspi_read_reg(U8 opcode, U8 *out, U32 len)
 {
+    qspi_prepare_indirect();
     qspi_wait_busy();
     qspi_clear_flags();
     QSPI_DLR = len - 1;
@@ -183,15 +233,14 @@ static void hardware_init(void)
     gpio_set_af(GPIOD_BASE, 13,  9);    /* IO3   AF9  */
 
     /* If a previous run (bootloader) left QSPI memory-mapped, abort first. */
+    qspi_mmap_active = 0;
     QSPI_CR  = 0;
-    QSPI_CR |= (1U << 1);   /* ABORT */
-    while (QSPI_CR & (1U << 1)) { }
-    qspi_clear_flags();
+    qspi_abort();
 
-    /* PRESCALER=3 (D1HCLK/4 ~= 60 MHz assuming bootloader left 240 MHz; if the
-     * core is at default HSI 64 MHz this becomes 16 MHz which is still fine).
-     * SSHIFT=1, TCEN=1. */
-    QSPI_CR  = (3U << 24) | (1U << 4) | (1U << 3);
+    /* PRESCALER=1. After J-Link's reset the H7 normally runs from 64 MHz HSI,
+     * so QSPI is 32 MHz; if the clock tree is already up this is still within
+     * the W25Q64JV's 133 MHz read/program command limit on this board. */
+    QSPI_CR  = (1U << 24) | (1U << 4) | (1U << 3);
     /* FSIZE=22 (8 MB), CSHT=3 (4 cycles), CKMODE=0 */
     QSPI_DCR = (22U << 16) | (3U << 8);
     /* Enable */
@@ -255,6 +304,7 @@ int UnInit(U32 fnc)
     (void)fnc;
     /* Disable QSPI peripheral so the next image (or bootloader run) sees a
      * clean state. */
+    qspi_abort();
     QSPI_CR = 0;
     return 0;
 }
@@ -266,18 +316,19 @@ int EraseSector(U32 adr)
 
     if (qspi_cmd(CMD_WREN) != 0) return 1;
 
-    /* Sector erase 4 KB at offset `off`. */
+    /* 64 KB block erase. The flash device descriptor advertises 64 KB sectors
+     * so J-Link aligns affected ranges before calling us. */
     qspi_wait_busy();
     qspi_clear_flags();
-    QSPI_CCR = CCR_FMODE_WR | CCR_IMODE_1L | CCR_ADMODE_1L | CCR_ADSIZE_24 | CMD_SE_4K;
+    QSPI_CCR = CCR_FMODE_WR | CCR_IMODE_1L | CCR_ADMODE_1L | CCR_ADSIZE_24 | CMD_BE_64K;
     QSPI_AR  = off;
     while (!(QSPI_SR & SR_TCF)) {
         if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return 2; }
     }
     qspi_clear_flags();
 
-    /* W25Q64 sector erase: tSE max ~400ms. */
-    if (wait_wip_clear(20000000) != 0) return 3;
+    /* W25Q64 64 KB block erase: tBE1 max ~2s. */
+    if (wait_wip_clear(100000000) != 0) return 3;
     return 0;
 }
 
@@ -296,12 +347,72 @@ int ProgramPage(U32 adr, U32 sz, U8 *buf)
 {
     U32 off = adr - 0x90000000U;
     if (sz == 0) return 0;
-    if (sz > 256) return 1;
 
-    if (qspi_cmd(CMD_WREN) != 0) return 2;
-    if (qspi_cmd_addr_write(CMD_PP, off, buf, sz) != 0) return 3;
-    if (wait_wip_clear(2000000) != 0) return 4;
+    while (sz) {
+        U32 chunk = 256U - (off & 0xFFU);
+        if (chunk > sz) chunk = sz;
+
+        if (qspi_cmd(CMD_WREN) != 0) return 2;
+        if (qspi_cmd_addr_write(CMD_QPP, off, buf, chunk, CCR_DMODE_4L) != 0) return 3;
+        if (wait_wip_clear(2000000) != 0) return 4;
+
+        off += chunk;
+        buf += chunk;
+        sz  -= chunk;
+    }
     return 0;
+}
+
+static int qspi_enter_memory_mapped_read(void)
+{
+    if (qspi_mmap_active) {
+        return 0;
+    }
+
+    qspi_wait_busy();
+    qspi_clear_flags();
+
+    /* Same read mode as the bootloader: 0xEB 1-4-4, 8-bit mode byte on 4
+     * lines, then 4 additional dummy cycles. */
+    QSPI_ABR = 0xF0U;
+    QSPI_CCR = CCR_FMODE_MM | CCR_IMODE_1L | CCR_ADMODE_4L | CCR_ADSIZE_24 |
+               CCR_ABMODE_4L | CCR_ABSIZE_8 | CCR_DCYC(4) |
+               CCR_DMODE_4L | CMD_FAST_4IO;
+    qspi_mmap_active = 1;
+    return 0;
+}
+
+static void copy_from_mmap(U32 adr, U32 sz, U8 *buf)
+{
+    const volatile U8 *src8 = (const volatile U8 *)adr;
+
+    while (sz && ((((U32)src8 | (U32)buf) & 3U) != 0U)) {
+        *buf++ = *src8++;
+        sz--;
+    }
+
+    const volatile U32 *src32 = (const volatile U32 *)src8;
+    U32 *dst32 = (U32 *)buf;
+    while (sz >= 16U) {
+        dst32[0] = src32[0];
+        dst32[1] = src32[1];
+        dst32[2] = src32[2];
+        dst32[3] = src32[3];
+        src32 += 4;
+        dst32 += 4;
+        sz -= 16U;
+    }
+    while (sz >= 4U) {
+        *dst32++ = *src32++;
+        sz -= 4U;
+    }
+
+    src8 = (const volatile U8 *)src32;
+    buf = (U8 *)dst32;
+    while (sz) {
+        *buf++ = *src8++;
+        sz--;
+    }
 }
 
 /* SEGGER Open Flashloader extension. J-Link calls this when it needs to read
@@ -312,28 +423,10 @@ int ProgramPage(U32 adr, U32 sz, U8 *buf)
 __attribute__((used))
 int SEGGER_OPEN_Read(U32 adr, U32 sz, U8 *buf)
 {
-    U32 off = adr - 0x90000000U;
     if (sz == 0) return 0;
 
-    qspi_wait_busy();
-    qspi_clear_flags();
-    QSPI_DLR = sz - 1;
-    /* Fast Read (0x0B): 1-1-1, 8 dummy cycles, 24-bit address. */
-    QSPI_CCR = CCR_FMODE_RD | CCR_IMODE_1L | CCR_ADMODE_1L | CCR_ADSIZE_24 |
-               CCR_DCYC(8) | CCR_DMODE_1L | 0x0B;
-    QSPI_AR  = off;
-
-    for (U32 i = 0; i < sz; i++) {
-        while (!(QSPI_SR & SR_FTF)) {
-            if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -1; }
-            if ((QSPI_SR & SR_TCF) && !(QSPI_SR & SR_FTF) && i + 1 >= sz) break;
-        }
-        buf[i] = QSPI_DR_BYTE;
-    }
-    while (!(QSPI_SR & SR_TCF)) {
-        if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -2; }
-    }
-    qspi_clear_flags();
+    if (qspi_enter_memory_mapped_read() != 0) return -1;
+    copy_from_mmap(adr, sz, buf);
     return (int)sz;
 }
 
