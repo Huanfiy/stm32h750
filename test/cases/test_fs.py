@@ -2,7 +2,7 @@
 """SD-card filesystem mount closed-loop test.
 
 PARKED — currently blocked by the STM32H7 SDMMC ACMD51 / IDMA hang documented
-in `.agent/fixed/2026-05-29-stm32h7-sdmmc-acmd51-idma-hang.md`. Without that
+in `.agent/issues/2026-05-29-stm32h7-sdmmc-acmd51-idma-hang.md`. Without that
 fix, mmcsd_core aborts SD init after CSD parsing and `sd0` is never
 registered, so the auto-mount in `app_drv_fs.c` cannot proceed and `/` stays
 empty. This case is NOT in `CASE_ORDER` yet; re-add it once the driver fix
