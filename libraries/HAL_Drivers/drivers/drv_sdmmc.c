@@ -52,8 +52,11 @@ struct rthw_sdio
     struct sdio_pkg *pkg;
 };
 
+/* SDMMC1 IDMA (D1 AHB master) cannot reach DTCM — placing this in default
+ * .bss (DTCM) causes an imprecise BusFault on the first block read. Put it in
+ * the linker's AXI-SRAM .dma_buffer reservation alongside the ADC1 buffer. */
 rt_align(SDIO_ALIGN_LEN)
-static rt_uint8_t cache_buf[SDIO_BUFF_SIZE];
+static rt_uint8_t cache_buf[SDIO_BUFF_SIZE] __attribute__((section(".dma_buffer")));
 
 /**
   * @brief  This function get order from sdio.

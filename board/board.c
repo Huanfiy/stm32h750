@@ -14,18 +14,23 @@ DMA_HandleTypeDef hdma_adc1;
 DMA_HandleTypeDef hdma_adc3;
 
 #ifdef RT_USING_MEMHEAP
-#define AXI_SRAM_ADDR (0X24000000)
-#define AXI_SRAM_SIZE (512*1024)
-#define SRAM1_ADDR (0X30000000)
-#define SRAM1_SIZE (128*1024)
-#define SRAM2_ADDR (0X30020000)
-#define SRAM2_SIZE (128*1024)
-#define SRAM3_ADDR (0X30040000)
-#define SRAM3_SIZE (32*1024)
-#define SRAM4_ADDR (0X38000000)
-#define SRAM4_SIZE (64*1024)
-#define BACKUP_ADDR (0X38800000)
-#define BACKUP_SIZE (4*1024)
+#define AXI_SRAM_END  (0X24000000 + 512*1024)
+#define SRAM1_ADDR    (0X30000000)
+#define SRAM1_SIZE    (128*1024)
+#define SRAM2_ADDR    (0X30020000)
+#define SRAM2_SIZE    (128*1024)
+#define SRAM3_ADDR    (0X30040000)
+#define SRAM3_SIZE    (32*1024)
+#define SRAM4_END     (0X38000000 + 64*1024)
+#define BACKUP_ADDR   (0X38800000)
+#define BACKUP_SIZE   (4*1024)
+
+/* Linker reserves .dma_buffer at the start of RAM_D1 (AXI SRAM) and .ram_d3 at
+ * the start of RAM_D3 (SRAM4) — the AXI/SRAM4 heaps must begin past those
+ * reservations or rt_memheap_init writes its header on top of the DMA buffers
+ * (e.g. drv_sdmmc.c::cache_buf, app_drv_adc.c::adc{1,3}_dma_buf). */
+extern char _dma_buffer_end[];
+extern char _ram_d3_end[];
 
 static struct rt_memheap _heap_axi_sram;
 static struct rt_memheap _heap_sram1;
@@ -107,11 +112,13 @@ static int init_sram(void)
     __HAL_RCC_D2SRAM1_CLK_ENABLE();
     __HAL_RCC_D2SRAM2_CLK_ENABLE();
     __HAL_RCC_D2SRAM3_CLK_ENABLE();
-    rt_memheap_init(&_heap_axi_sram, "axi_sram", (void *)AXI_SRAM_ADDR, AXI_SRAM_SIZE);
+    rt_memheap_init(&_heap_axi_sram, "axi_sram", (void *)_dma_buffer_end,
+                    AXI_SRAM_END - (rt_uint32_t)_dma_buffer_end);
     rt_memheap_init(&_heap_sram1, "sram1", (void *)SRAM1_ADDR, SRAM1_SIZE);
     rt_memheap_init(&_heap_sram2, "sram2", (void *)SRAM2_ADDR, SRAM2_SIZE);
     rt_memheap_init(&_heap_sram3, "sram3", (void *)SRAM3_ADDR, SRAM3_SIZE);
-    rt_memheap_init(&_heap_sram4, "sram4", (void *)SRAM4_ADDR, SRAM4_SIZE);
+    rt_memheap_init(&_heap_sram4, "sram4", (void *)_ram_d3_end,
+                    SRAM4_END - (rt_uint32_t)_ram_d3_end);
     rt_memheap_init(&_heap_backup_sram, "bak_sram", (void *)BACKUP_ADDR, BACKUP_SIZE);
 
     return 0;
@@ -150,6 +157,15 @@ static void mpu_config_qspi_xip(void)
  * enables SysTick and from then on needs the right vector table). */
 void rt_hw_board_init(void)
 {
+    /* Cortex-M7 cache tag/data RAM is undefined out of reset. If any line is
+     * tagged valid+dirty with a garbage physical address, a later DCCISW
+     * (e.g. drv_sdmmc.c's SCB_CleanInvalidateDCache) writes back to that
+     * garbage address and raises an imprecise BusFault. Run a pure DCISW
+     * invalidate (no writeback) before any cache maintenance can be issued
+     * by downstream drivers, even when BSP_SCB_ENABLE_D_CACHE is off. */
+    SCB_InvalidateICache();
+    SCB_InvalidateDCache();
+
     mpu_config_qspi_xip();
 
     /* Relocate the vector table to the start of the QSPI XIP image. */
