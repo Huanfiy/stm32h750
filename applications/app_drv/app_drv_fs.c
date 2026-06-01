@@ -26,7 +26,7 @@
 #define SD_WAIT_TICKS_MS 100
 #define SD_WAIT_MAX_MS   10000
 #define FS_THREAD_PRIO   25
-#define FS_THREAD_STACK  2048
+#define FS_THREAD_STACK  4096   /* FatFs f_mount + ELM glue + LFN(heap) call chain */
 
 static void fs_mount_thread_entry(void *param)
 {

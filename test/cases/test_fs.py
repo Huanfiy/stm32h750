@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""SD-card filesystem mount closed-loop test.
+"""SD-card FAT filesystem closed-loop test: auto-mount + write→reset→readback.
 
-PARKED — currently blocked by the STM32H7 SDMMC ACMD51 / IDMA hang documented
-in `.agent/issues/2026-05-29-stm32h7-sdmmc-acmd51-idma-hang.md`. Without that
-fix, mmcsd_core aborts SD init after CSD parsing and `sd0` is never
-registered, so the auto-mount in `app_drv_fs.c` cannot proceed and `/` stays
-empty. This case is NOT in `CASE_ORDER` yet; re-add it once the driver fix
-lands and SCR can be read.
+Two things are proven end-to-end against the real card:
 
-Resets the target with an SD card present in SDMMC1 and verifies that the
-ELM/FATFS filesystem on the card auto-mounts at `/`, i.e. `ls /` no longer
-returns `No such directory` and produces a parsable listing.
+1. **Mount** — after reset, mmcsd enumerates `sd0` and `app_drv_fs` auto-mounts
+   it at `/` as ELM/FATFS, with no hard fault. `ls /` resolves through FATFS
+   (not just the `/dev` devfs submount).
 
-The auto-mount is intended to run from an `INIT_APP_EXPORT` hook after the
-mmcsd thread has registered `sd0`. PASS criteria:
-- msh prompt reached, no `hard fault`
-- `ls /` output does NOT contain `No such directory`
-- The output contains the FAT-style header `Directory /` or at least one
-  filename token, proving DFS resolved the path through ELM/FATFS.
+2. **Data integrity across a power-cycle** — a *fresh* nonce is written to
+   `/fsprobe.txt`, then the target is **reset**. The reset drops the DFS V2
+   page cache and forces a real remount, so reading the nonce back via `cat`
+   proves the bytes physically landed on the card and are read back through a
+   fresh FATFS mount. This is the part the old mount-only check could not do:
+   it defeats the pcache and would catch mis-parsed partition geometry (the
+   card enumerates with a suspicious `begin: 4194304` / size overshoot — if a
+   write landed at the wrong LBA the post-reset readback would differ).
+
+A fresh time-based nonce each run means a stale `/fsprobe.txt` left by a prior
+run cannot produce a false PASS.
 
 Hardware-skip rules (autotools 77): no JLinkExe, no serial TTY, or no
-`SD card capacity` log within 8 s of msh (card not inserted / not
-power-cycled since previous fault).
+`SD card capacity` log within timeout (card not inserted / not power-cycled
+since a previous fault).
 """
 
 from __future__ import annotations
@@ -37,6 +37,37 @@ from lib import jlink, serial_term  # noqa: E402
 EXIT_PASS, EXIT_FAIL, EXIT_SKIP = 0, 1, 77
 
 CAPACITY_RE = re.compile(rb"SD card capacity\s+\d+\s*KB")
+PROMPT = rb"msh\s*/>"
+PROBE_FILE = "/fsprobe.txt"
+
+
+def boot_and_wait_mount(term: "serial_term.Term") -> tuple[bytes, bool, bool]:
+    """Reset target, wait for the msh prompt, then drain a bit so the mmcsd
+    detect thread + auto-mount finish. Returns (buf, msh_ok, capacity_seen)."""
+    jlink.reset_run()
+    time.sleep(0.2)
+    buf, msh_ok = term.expect(PROMPT, timeout=6.0)
+    buf += term.read(4.0)
+    return buf, msh_ok, bool(CAPACITY_RE.search(buf))
+
+
+def cmd(term: "serial_term.Term", line: str, timeout: float = 4.0,
+        settle: float = 0.4) -> tuple[bytes, bool]:
+    """Send one msh command and wait for the next prompt.
+
+    finsh occasionally drops the first keystroke right after printing a prompt
+    (the leading char races the shell entering its read loop), turning `echo …`
+    into `cho: command not found.`. Drain + settle before sending, and retry
+    once if the shell reports the mangled command as not found — so a transient
+    serial glitch can't masquerade as a filesystem failure."""
+    buf, ok = b"", False
+    for _ in range(2):
+        term.read(settle)            # let the prompt finish; drain stale bytes
+        term.send_line(line)
+        buf, ok = term.expect(PROMPT, timeout)
+        if ok and b"command not found" not in buf:
+            return buf, ok
+    return buf, ok
 
 
 def main() -> int:
@@ -47,63 +78,72 @@ def main() -> int:
         print(f"SKIP: serial device {serial_term.DEFAULT_DEV} not present")
         return EXIT_SKIP
 
+    nonce = f"FSPROBE{int(time.time())}END"
+
     try:
         with serial_term.Term() as term:
+            # ---- Phase 1: first boot, confirm sd0 mounted at / ----
             try:
-                jlink.reset_run()
+                boot1, msh_ok, cap = boot_and_wait_mount(term)
             except jlink.JLinkUnavailable as exc:
                 print(f"SKIP: J-Link unreachable: {exc}")
                 return EXIT_SKIP
 
-            time.sleep(0.2)
-            buf, msh_ok = term.expect(rb"msh\s*/>", timeout=6.0)
-            # let mmcsd_de detect + auto-mount run
-            buf += term.read(5.0)
+            print("--- boot #1 capture ---")
+            sys.stdout.write(boot1.decode(errors="replace"))
 
-            ls_buf = b""
-            ls_returned = False
-            if msh_ok and b"hard fault" not in buf and CAPACITY_RE.search(buf):
-                term.send_line("ls /")
-                ls_buf, ls_returned = term.expect(rb"msh\s*/>", timeout=6.0)
+            if not msh_ok:
+                print("\nFAIL: msh prompt not seen within 6 s")
+                return EXIT_FAIL
+            if b"hard fault" in boot1:
+                print("\nFAIL: hard fault during/after SDIO bring-up")
+                return EXIT_FAIL
+            if not cap:
+                print("\nSKIP: no `SD card capacity` log — card likely not inserted")
+                return EXIT_SKIP
+
+            ls_buf, ls_ok = cmd(term, "ls /", timeout=6.0)
+            if not ls_ok or b"No such directory" in ls_buf:
+                sys.stdout.write("\n--- ls / ---\n" + ls_buf.decode(errors="replace"))
+                print("\nFAIL: `/` not mounted — auto-mount did not run or failed")
+                return EXIT_FAIL
+
+            # ---- Phase 2: write a fresh nonce to the card ----
+            cmd(term, f"rm {PROBE_FILE}")               # clear any prior run's file (ignore)
+            wbuf, _ = cmd(term, f"echo {nonce} {PROBE_FILE}")
+            if b"failed" in wbuf or b"[E/" in wbuf:
+                sys.stdout.write("\n--- write ---\n" + wbuf.decode(errors="replace"))
+                print("\nFAIL: write to card failed (echo could not open/write file)")
+                return EXIT_FAIL
+
+            # immediate roundtrip (may be served from pcache — not yet conclusive)
+            cat1, _ = cmd(term, f"cat {PROBE_FILE}")
+            if nonce.encode() not in cat1:
+                sys.stdout.write("\n--- cat (pre-reset) ---\n" + cat1.decode(errors="replace"))
+                print("\nFAIL: nonce not read back immediately after write")
+                return EXIT_FAIL
+
+            # ---- Phase 3: reset (drop pcache) then read back from the card ----
+            boot2, msh_ok2, cap2 = boot_and_wait_mount(term)
+            if not msh_ok2 or not cap2:
+                sys.stdout.write("\n--- boot #2 ---\n" + boot2.decode(errors="replace"))
+                print("\nFAIL: second boot did not reach a mounted msh prompt")
+                return EXIT_FAIL
+
+            cat2, _ = cmd(term, f"cat {PROBE_FILE}")
     except OSError as exc:
         print(f"SKIP: serial open failed: {exc}")
         return EXIT_SKIP
 
-    print("--- boot capture ---")
-    sys.stdout.write(buf.decode(errors="replace"))
-    if ls_buf:
-        sys.stdout.write("\n--- ls / capture ---\n")
-        sys.stdout.write(ls_buf.decode(errors="replace"))
+    sys.stdout.write("\n--- cat (post-reset readback from card) ---\n")
+    sys.stdout.write(cat2.decode(errors="replace"))
     sys.stdout.write("\n--- end ---\n")
 
-    if not msh_ok:
-        print("FAIL: msh prompt not seen within 6 s")
-        return EXIT_FAIL
-    if b"hard fault" in buf:
-        print("FAIL: hard fault during/after SDIO bring-up")
-        return EXIT_FAIL
-    if not CAPACITY_RE.search(buf):
-        print("SKIP: no `SD card capacity` log — card likely not inserted")
-        return EXIT_SKIP
-
-    if not ls_returned:
-        print("FAIL: `ls /` never returned to msh prompt within 6 s")
-        return EXIT_FAIL
-    if b"No such directory" in ls_buf:
-        print("FAIL: `/` not mounted — auto-mount did not run or failed")
-        return EXIT_FAIL
-    # DFS V1 prints `Directory /`; V2 prints entries directly. Either way the
-    # response must contain at least one non-error token between the echoed
-    # command and the next prompt — and must not be only error text.
-    payload = ls_buf.split(b"ls /", 1)[-1].rsplit(b"msh", 1)[0]
-    if b"[E/" in payload and b"Directory" not in payload:
-        print("FAIL: `ls /` returned only error text, not a listing")
-        return EXIT_FAIL
-    if not re.search(rb"(Directory\s*/|[A-Za-z0-9_][A-Za-z0-9_.-]{0,254})", payload):
-        print("FAIL: `ls /` produced empty payload, no listing visible")
+    if nonce.encode() not in cat2:
+        print(f"FAIL: nonce {nonce} not found after reset+remount — data did not persist to card")
         return EXIT_FAIL
 
-    print("PASS: SD card auto-mounted at /, ls / returned a directory listing")
+    print(f"PASS: wrote {nonce} to {PROBE_FILE}, survived reset, read back from physical card")
     return EXIT_PASS
 
 

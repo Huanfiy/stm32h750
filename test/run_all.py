@@ -16,7 +16,7 @@ CASES_DIR = Path(__file__).resolve().parent / "cases"
 
 # Order matters: swd resets first (proves bootloader+app jump), boot then
 # verifies the msh banner before any case sends an msh command.
-CASE_ORDER = ["test_swd.py", "test_boot.py", "test_sd.py", "test_adc.py", "test_can.py"]
+CASE_ORDER = ["test_swd.py", "test_boot.py", "test_sd.py", "test_fs.py", "test_adc.py", "test_can.py"]
 
 STATUS = {0: "PASS", 1: "FAIL", 77: "SKIP"}
 COLOR = {"PASS": "\033[92m", "FAIL": "\033[91m", "SKIP": "\033[93m"}
