@@ -8,9 +8,9 @@
 #define PWM_DEV_NAME            "pwm1"
 #define PWM_DEV_CHANNEL         1
 
-/* CubeMX: PSC=239, ARR=1999 @ 240 MHz TIM1 clk → 500 Hz (2 ms period). */
-#define PWM_DEFAULT_PERIOD_NS      2000000U
-#define PWM_DEFAULT_HIGH_TIME_NS   1500000U   /* 1.5 ms → 75% @ 2 ms period */
+/* CubeMX: PSC=239, ARR=19999 @ 240 MHz TIM1 clk → 50 Hz (20 ms period). */
+#define PWM_DEFAULT_PERIOD_NS      20000000U
+#define PWM_DEFAULT_HIGH_TIME_NS   1500000U   /* 1.5 ms → 7.5% @ 20 ms period */
 
 static struct {
     struct rt_device_pwm *dev;
