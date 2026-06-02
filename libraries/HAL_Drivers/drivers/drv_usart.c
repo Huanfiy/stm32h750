@@ -229,6 +229,22 @@ static rt_err_t stm32_configure(struct rt_serial_device *serial, struct serial_c
     {
         return -RT_ERROR;
     }
+
+#if defined(SOC_SERIES_STM32H7)
+    /* Enable the 16-byte hardware RX/TX FIFO. finsh opens the console in INT_RX
+     * mode (RT_DEVICE_FLAG_INT_RX, hard-coded in shell.c) so every byte still
+     * raises a per-byte RXFNE interrupt, but the FIFO now buffers up to 16 chars
+     * when the ISR is late. This BSP runs from QSPI XIP, so interrupt-entry
+     * latency spikes were overrunning the 1-byte RDR and dropping ~50% of
+     * back-to-back bytes at 115200 — which broke any multi-byte input, e.g. the
+     * up/down-arrow history escape sequence (0x1b 0x5b 0x41). The FIFO turns the
+     * hard ~87us per-byte deadline into a soft ~1.4ms one.
+     * See test/cases/test_msh_history.py. */
+    HAL_UARTEx_SetRxFifoThreshold(&uart->handle, UART_RXFIFO_THRESHOLD_1_8);
+    HAL_UARTEx_SetTxFifoThreshold(&uart->handle, UART_TXFIFO_THRESHOLD_1_8);
+    HAL_UARTEx_EnableFifoMode(&uart->handle);
+#endif /* SOC_SERIES_STM32H7 */
+
     uart->DR_mask = stm32_uart_get_mask(uart->handle.Init.WordLength, uart->handle.Init.Parity);
     uart->tx_block_timeout = BSP_STM32_UART_V1_TX_TIMEOUT;
     return RT_EOK;

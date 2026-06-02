@@ -86,6 +86,16 @@ class Term:
             time.sleep(char_delay)
         os.write(self.fd, b"\r\n")
 
+    def send_raw(self, data: bytes) -> None:
+        """Write raw bytes in a single os.write, no pacing and no CRLF.
+
+        Used to reproduce what a real terminal does — e.g. an arrow key is the
+        3-byte escape `\\x1b[A` sent back-to-back at wire speed. Unlike
+        `send_line`, this does NOT pace bytes, so it exercises the UART's
+        ability to keep up with a burst.
+        """
+        os.write(self.fd, data)
+
     def expect(self, pattern: str | bytes, timeout: float) -> tuple[bytes, bool]:
         """Read until `pattern` (regex, str or bytes) matches or timeout elapses."""
         if isinstance(pattern, str):
