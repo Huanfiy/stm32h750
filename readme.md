@@ -102,18 +102,19 @@
 首次端到端烧录（两段固件均需写入）：
 
 ```sh
-./run.sh boot-rebuild-flash    # 编译并烧录 bootloader 至内部 Flash
-./run.sh app-rebuild-flash     # 编译并烧录主程序至外部 QSPI
+./run.sh rebuild-flash         # 编译并烧录 bootloader + 主程序
 ./run.sh reset                 # 复位，bootloader 跳入主程序
 ```
 
 常用命令：
 
 ```sh
-./run.sh build                 # 编译主程序，生成 .vscode/compile_commands.json
-./run.sh app-flash             # 仅烧录主程序至 0x90000000
-./run.sh clean                 # 清理主程序构建产物
-./run.sh boot-build            # 仅编译 bootloader
+./run.sh build                 # 编译 bootloader + 主程序
+./run.sh flash                 # 烧录 bootloader 至 0x08000000，主程序至 0x90000000
+./run.sh build-app             # 仅编译主程序，生成 .vscode/compile_commands.json
+./run.sh flash-app             # 仅烧录主程序至 0x90000000
+./run.sh build-bl              # 仅编译 bootloader
+./run.sh flash-bl              # 仅烧录 bootloader 至 0x08000000
 ./run.sh <cmd> -v              # 显示完整 scons/make 输出
 ```
 

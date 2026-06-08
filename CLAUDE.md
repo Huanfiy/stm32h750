@@ -9,7 +9,7 @@ RT-Thread 5.2.0 BSP for STM32H750VBT6 (Cortex-M7 @ 480 MHz), the MCU for the Sma
 - **Bootloader** (`bootloader/`, own `Makefile` + `linker_scripts/boot.lds`). Bare HAL, ~17 KB. Lives in **internal flash @ 0x08000000** (128 KB region). On reset it brings up QSPI W25Q64 in 1-4-4 memory-mapped mode and jumps to `APP_BASE_ADDR = 0x90000000`.
 - **Main app** (root `SConstruct`). Full RT-Thread kernel + HAL drivers + finsh shell. Lives in **external W25Q64 @ 0x90000000** (8 MB QSPI XIP); `.data`/`.bss`/.stack stay in DTCM (`0x20000000`/128 KB). `Reset_Handler` copies `.data` from QSPI to DTCM and zeros `.bss` like a normal Cortex-M boot — the only QSPI-specific tweak is `SCB->VTOR = 0x90000000` and an MPU region (done in `board.c::rt_hw_board_init`).
 
-Both images are flashed via J-Link. Internal-flash and QSPI-flash slots are **separate** — `boot-flash` and `app-flash` never overwrite each other.
+Both images are flashed via J-Link. Internal-flash and QSPI-flash slots are **separate** — `flash-bl` and `flash-app` never overwrite each other. The default `flash` command writes both images to their proper slots.
 
 ## External dependencies
 
@@ -24,29 +24,28 @@ Both images are flashed via J-Link. Internal-flash and QSPI-flash slots are **se
 Everything goes through `run.sh` (do not call `scons` directly unless debugging the build system):
 
 ```
-# Main app (QSPI XIP)
-./run.sh build              # scons -j$(nproc), pipes through `bear` → .vscode/compile_commands.json
-./run.sh clean              # scons -c + rm -rf build/
-./run.sh app-flash          # JLink loadbin build/rt-thread.bin → 0x90000000 via custom .FLM
-./run.sh app-rebuild-flash
-./run.sh flash              # legacy: writes build/rt-thread.bin to 0x08000000 (would overwrite bootloader!)
+./run.sh build              # build bootloader + app
+./run.sh rebuild            # clean + build bootloader + app
+./run.sh flash              # flash bootloader → 0x08000000, app → 0x90000000
+./run.sh rebuild-flash      # clean + build + flash both images
+./run.sh clean              # clean bootloader + app artifacts
 ./run.sh reset              # JLink reset+go, no flashing
-./run.sh rebuild[-flash]
 
-# Bootloader (internal flash)
-./run.sh boot-build         # make -C bootloader -j$(nproc), output bootloader/build/bootloader.{elf,bin}
-./run.sh boot-clean
-./run.sh boot-flash         # flashes bootloader.bin → 0x08000000
-./run.sh boot-rebuild[-flash]
+# Single-image commands
+./run.sh build-bl           # make -C bootloader -j$(nproc), output bootloader/build/bootloader.{elf,bin}
+./run.sh flash-bl           # flash bootloader.bin → 0x08000000
+./run.sh rebuild-flash-bl
+./run.sh build-app          # scons -j$(nproc), pipes through `bear` → .vscode/compile_commands.json
+./run.sh flash-app          # JLink loadbin build/rt-thread.bin → 0x90000000 via custom .FLM
+./run.sh rebuild-flash-app
 
 ./run.sh <cmd> -v           # show full scons output (default is --silent)
 ```
 
-Two-step end-to-end first-time setup:
+End-to-end first-time setup:
 
 ```
-./run.sh boot-rebuild-flash       # populate internal flash
-./run.sh app-rebuild-flash        # populate external QSPI
+./run.sh rebuild-flash            # populate internal flash + external QSPI
 ./run.sh reset                    # bootloader will pick up the app and jump
 ```
 
@@ -106,7 +105,7 @@ The RT-Thread-patched `startup_stm32h750xx.s` jumps to `entry` (RT-Thread intern
 
 ## Debugging tips
 
-When a build silently hangs after `boot-flash` / `app-flash` / `reset`:
+When a build silently hangs after `flash-bl` / `flash-app` / `reset`:
 1. `JLinkExe` → `connect`, `h`, `regs` — read `PC`, `IPSR`, fault registers (`E000ED28` CFSR, `E000ED2C` HFSR, `E000ED34` MMFAR).
 2. `arm-none-eabi-addr2line -e <elf> -f -C <PC>` to map PC to function.
 3. If PC sits in `rt_assert_handler`'s spin loop with `IPSR=NoException`, scan the MSP frame (`mem32 <MSP> 32`) for return addresses pointing into QSPI/internal flash, then `addr2line` each candidate to recover the call chain — the original `LR` is gone because the assert handler's own stack frame trampled it.
@@ -166,6 +165,6 @@ runs.
 - Toolchain is GCC-only (`PLATFORM = 'gcc'`, `CROSS_TOOL = 'gcc'`). The Keil/IAR branches in `rtconfig.py` were removed.
 - `RT_NAME_MAX = 8` — RT-Thread object names (threads, semaphores, devices) truncate at 8 chars.
 - All board-level peripheral enables go through `board/Kconfig`'s `BSP_USING_*` flags; the underlying `RT_USING_*` Components flags are `select`ed from there. Don't toggle the `RT_USING_*` ones directly when adding a peripheral — flip the BSP flag and let Kconfig propagate.
-- The flash/debug device string is `STM32H750VB` for J-Link CLI (both `boot-flash` and `app-flash`), `STM32H750VBTx` for cortex-debug (`.vscode/launch.json`). Don't unify them — the two tools expect different forms.
+- The flash/debug device string is `STM32H750VB` for J-Link CLI (both `flash-bl` and `flash-app`), `STM32H750VBTx` for cortex-debug (`.vscode/launch.json`). Don't unify them — the two tools expect different forms.
 - `bootloader/` and `tools/flashloader/` are independent Make-based builds; **never** add them to the root `SConstruct` (and never let the root `SConstruct`'s subdir-scanning logic in `board/SConscript` reach them either — it auto-pulls any nested `SConscript`, which would multiple-define `main` / `HAL_QSPI_MspInit` / `FlashDevice`).
-- The user-level J-Link `JLinkDevices.xml` lives outside the repo (`~/.config/SEGGER/JLinkDevices/Custom/`). The source of truth is `tools/flashloader/JLinkDevices.xml`; sync via `make -C tools/flashloader install`. On a fresh machine, `./run.sh app-flash` will fail until that's done.
+- The user-level J-Link `JLinkDevices.xml` lives outside the repo (`~/.config/SEGGER/JLinkDevices/Custom/`). The source of truth is `tools/flashloader/JLinkDevices.xml`; sync via `make -C tools/flashloader install`. On a fresh machine, `./run.sh flash-app` will fail until that's done.

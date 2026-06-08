@@ -59,7 +59,7 @@ update_compile_commands() {
 # ==============================================================================
 # Commands
 # ==============================================================================
-cmd_build() {
+cmd_build_app() {
     check_toolchain
 
     local scons_args=(-j$(nproc) -Q)
@@ -67,54 +67,26 @@ cmd_build() {
         scons_args+=("--silent")
     fi
 
-    log_info "Building..."
+    log_info "Building app..."
     bear --output compile_commands.json -- scons "${scons_args[@]}"
     local rc=$?
 
     update_compile_commands
 
-    [[ $rc -ne 0 ]] && die "Build failed."
-    log_success "Build complete."
+    [[ $rc -ne 0 ]] && die "App build failed."
+    log_success "App build complete: $BIN_FILE"
 }
 
-cmd_clean() {
+cmd_clean_app() {
     check_toolchain
-    log_info "Cleaning..."
+    log_info "Cleaning app..."
     scons -c -Q
     rm -rf "$BUILD_DIR"
-    log_success "Clean complete."
-}
-
-cmd_flash() {
-    [[ -f "$BIN_FILE" ]] || die "$BIN_FILE not found. Build first."
-
-    log_info "Flashing $BIN_FILE to $FLASH_ADDR via J-Link $JLINK_INTF..."
-
-    local jlink_script
-    jlink_script=$(mktemp)
-    cat > "$jlink_script" <<EOF
-si $JLINK_INTF
-speed $JLINK_SPEED
-device $JLINK_DEVICE
-connect
-h
-loadbin $BIN_FILE, $FLASH_ADDR
-r
-g
-exit
-EOF
-
-    if JLinkExe -AutoConnect 1 -ExitOnError 1 -CommandFile "$jlink_script" > /dev/null 2>&1; then
-        log_success "Flash complete."
-    else
-        rm -f "$jlink_script"
-        die "Flash failed."
-    fi
-    rm -f "$jlink_script"
+    log_success "App clean complete."
 }
 
 cmd_app_flash() {
-    [[ -f "$BIN_FILE" ]] || die "$BIN_FILE not found. Run 'build' first."
+    [[ -f "$BIN_FILE" ]] || die "$BIN_FILE not found. Run 'build-app' first."
 
     local devfile="$HOME/.config/SEGGER/JLinkDevices/Custom/STM32H750VB_W25Q64/STM32H750VB_W25Q64.FLM"
     [[ -f "$devfile" ]] || die "$devfile not found. Run 'make -C tools/flashloader install' first."
@@ -150,7 +122,7 @@ EOF
     fi
 }
 
-cmd_boot_build() {
+cmd_build_bl() {
     check_toolchain
 
     local make_args=(-C "$BOOT_DIR" -j"$(nproc)")
@@ -165,14 +137,14 @@ cmd_boot_build() {
     log_success "Bootloader build complete: $BOOT_BIN_FILE"
 }
 
-cmd_boot_clean() {
+cmd_clean_bl() {
     log_info "Cleaning bootloader..."
     make -C "$BOOT_DIR" clean --no-print-directory
     log_success "Bootloader clean complete."
 }
 
-cmd_boot_flash() {
-    [[ -f "$BOOT_BIN_FILE" ]] || die "$BOOT_BIN_FILE not found. Run 'boot-build' first."
+cmd_flash_bl() {
+    [[ -f "$BOOT_BIN_FILE" ]] || die "$BOOT_BIN_FILE not found. Run 'build-bl' first."
 
     log_info "Flashing $BOOT_BIN_FILE to $FLASH_ADDR via J-Link $JLINK_INTF..."
 
@@ -197,6 +169,25 @@ EOF
         die "Bootloader flash failed."
     fi
     rm -f "$jlink_script"
+}
+
+cmd_build_all() {
+    cmd_build_bl
+    cmd_build_app
+}
+
+cmd_clean_all() {
+    cmd_clean_bl
+    cmd_clean_app
+}
+
+cmd_flash_app() {
+    cmd_app_flash
+}
+
+cmd_flash_all() {
+    cmd_flash_bl
+    cmd_flash_app
 }
 
 cmd_reset() {
@@ -224,19 +215,25 @@ show_help() {
 Usage: $0 <command> [options]
 
 Commands:
-  build              Build firmware (scons)
-  clean              Clean build artifacts
-  flash              Flash $BIN_FILE to $FLASH_ADDR (internal flash; legacy)
+  build              Build bootloader + app
+  rebuild            Clean + build bootloader + app
+  flash              Flash bootloader + app
+  rebuild-flash      Clean + build + flash bootloader + app
+  clean              Clean bootloader + app artifacts
+
+  build-bl           Build bootloader ($BOOT_BIN_FILE)
+  rebuild-bl         Clean + build bootloader
+  flash-bl           Flash bootloader to $FLASH_ADDR
+  rebuild-flash-bl   Clean + build + flash bootloader
+  clean-bl           Clean bootloader artifacts
+
+  build-app          Build app ($BIN_FILE)
+  rebuild-app        Clean + build app
+  flash-app          Flash app to $APP_FLASH_ADDR (external W25Q64)
+  rebuild-flash-app  Clean + build + flash app
+  clean-app          Clean app artifacts
+
   reset              Reset target via J-Link
-  rebuild            Clean + build
-  rebuild-flash      Clean + build + flash (internal flash; legacy)
-  app-flash          Flash $BIN_FILE to $APP_FLASH_ADDR (external W25Q64)
-  app-rebuild-flash  Clean + build + app-flash
-  boot-build         Build bootloader ($BOOT_BIN_FILE)
-  boot-clean         Clean bootloader artifacts
-  boot-flash         Flash $BOOT_BIN_FILE to $FLASH_ADDR (internal flash)
-  boot-rebuild       Clean + build bootloader
-  boot-rebuild-flash Clean + build + flash bootloader
   help               Show this help
 
 Options:
@@ -260,21 +257,27 @@ main() {
     done
 
     case "$cmd" in
-        build)               cmd_build ;;
-        clean)               cmd_clean ;;
-        flash)               cmd_flash ;;
+        build)               cmd_build_all ;;
+        rebuild)             cmd_clean_all; cmd_build_all ;;
+        flash)               cmd_flash_all ;;
+        rebuild-flash)       cmd_clean_all; cmd_build_all; cmd_flash_all ;;
+        clean)               cmd_clean_all ;;
+
+        build-bl)            cmd_build_bl ;;
+        rebuild-bl)          cmd_clean_bl; cmd_build_bl ;;
+        flash-bl)            cmd_flash_bl ;;
+        rebuild-flash-bl)    cmd_clean_bl; cmd_build_bl; cmd_flash_bl ;;
+        clean-bl)            cmd_clean_bl ;;
+
+        build-app)           cmd_build_app ;;
+        rebuild-app)         cmd_clean_app; cmd_build_app ;;
+        flash-app)           cmd_flash_app ;;
+        rebuild-flash-app)   cmd_clean_app; cmd_build_app; cmd_flash_app ;;
+        clean-app)           cmd_clean_app ;;
+
         reset)               cmd_reset ;;
-        rebuild)             cmd_clean; cmd_build ;;
-        rebuild-flash)       cmd_clean; cmd_build; cmd_flash ;;
-        app-flash)           cmd_app_flash ;;
-        app-rebuild-flash)   cmd_clean; cmd_build; cmd_app_flash ;;
-        boot-build)          cmd_boot_build ;;
-        boot-clean)          cmd_boot_clean ;;
-        boot-flash)          cmd_boot_flash ;;
-        boot-rebuild)        cmd_boot_clean; cmd_boot_build ;;
-        boot-rebuild-flash)  cmd_boot_clean; cmd_boot_build; cmd_boot_flash ;;
         help|--help|-h)      show_help ;;
-        *)                   die "Unknown command: $cmd" ;;
+        *)                   die "Unknown command: $cmd. Run '$0 help' for available commands." ;;
     esac
 }
 
