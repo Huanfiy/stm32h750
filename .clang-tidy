@@ -1,0 +1,68 @@
+Checks: >
+  -*,
+  bugprone-*,
+  misc-*,
+  performance-*,
+  readability-*,
+  cert-*,
+  -readability-magic-numbers,
+  -readability-non-const-parameter,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+  -*braces-around-statements,
+  -bugprone-easily-swappable-parameters,
+  -performance-no-int-to-ptr
+
+
+CheckOptions:
+  # 强制所有标识符使用下划线命名法
+  - { key: readability-identifier-naming.ClassCase, value: lower_case }
+  - { key: readability-identifier-naming.ClassMemberCase, value: lower_case }
+  - { key: readability-identifier-naming.ClassMemberSuffix, value: _ }  # 私有成员变量末尾添加下划线
+  
+  # 成员变量使用下划线命名法
+  - { key: readability-identifier-naming.MemberCase, value: lower_case }
+  - { key: readability-identifier-naming.MemberSeparator, value: _ }
+  
+  # 变量使用下划线命名法
+  - { key: readability-identifier-naming.VariableCase, value: lower_case }
+  - { key: readability-identifier-naming.VariableSeparator, value: _ }
+  
+  # 函数使用下划线命名法
+  - { key: readability-identifier-naming.FunctionCase, value: lower_case }
+  - { key: readability-identifier-naming.FunctionSeparator, value: _ }
+  
+  # 参数使用下划线命名法
+  - { key: readability-identifier-naming.ParameterCase, value: lower_case }
+  - { key: readability-identifier-naming.ParameterSeparator, value: _ }
+  
+  # 命名空间使用下划线命名法
+  - { key: readability-identifier-naming.NamespaceCase, value: lower_case }
+  - { key: readability-identifier-naming.NamespaceSeparator, value: _ }
+  
+  # 常量使用下划线命名法，全部大写
+  - { key: readability-identifier-naming.ConstantCase, value: UPPER_CASE }
+  - { key: readability-identifier-naming.ConstantSeparator, value: _ }
+  - { key: readability-identifier-naming.GlobalConstantCase, value: UPPER_CASE }
+  - { key: readability-identifier-naming.GlobalConstantSeparator, value: _ }
+  
+  # 枚举类型使用下划线命名法
+  - { key: readability-identifier-naming.EnumCase, value: lower_case }
+  - { key: readability-identifier-naming.EnumSeparator, value: _ }
+  - { key: readability-identifier-naming.EnumConstantCase, value: UPPER_CASE }
+  - { key: readability-identifier-naming.EnumConstantSeparator, value: _ }
+  
+  # 结构体使用下划线命名法
+  - { key: readability-identifier-naming.StructCase, value: lower_case }
+  - { key: readability-identifier-naming.StructSeparator, value: _ }
+  
+  # typedef 使用下划线命名法
+  - { key: readability-identifier-naming.TypedefCase, value: lower_case }
+  - { key: readability-identifier-naming.TypedefSeparator, value: _ }
+  
+  # 模板参数使用大驼峰命名法（可选，这是惯例）
+  - { key: readability-identifier-naming.TemplateParameterCase, value: CamelCase }
+  
+  # 宏定义使用下划线命名法，全部大写
+  - { key: readability-identifier-naming.MacroDefinitionCase, value: UPPER_CASE }
+  - { key: readability-identifier-naming.MacroDefinitionSeparator, value: _ }
