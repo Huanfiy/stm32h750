@@ -8,9 +8,9 @@ For each channel under test we:
   - `pwr_en <n> 1`  → expect the pin's GPIOx_ODR bit set
   - `pwr_en <n> 0`  → expect the pin's GPIOx_ODR bit clear
 
-Channel coverage spans all three ports the PWR_EN map touches (E/B/D). PWR_EN10
-(PE9) is deliberately excluded: it is shared with TIM1_CH1 and, with BSP_USING_PWM
-enabled, is held in alternate-function mode, so its ODR bit is not GPIO-owned.
+Channel coverage spans the 14 GPIO-owned PWR_EN outputs. PWR_EN7/PD2 and
+PWR_EN15/PE2 are deliberately excluded because the board reserves those nets for
+SDMMC_CMD and QSPI/XIP respectively.
 """
 
 from __future__ import annotations
@@ -32,18 +32,24 @@ def _odr(port: str) -> int:
     return _GPIO_BASE + (ord(port) - ord("A")) * 0x400 + _ODR_OFF
 
 
-# (PWR_EN channel number, port letter, pin bit). Spans ports E/B/D using only
-# fully-free pins. The 4 reserved channels are excluded because a peripheral owns
-# the pin and the module refuses to drive them:
-#   PWR_EN15/PE2 = QUADSPI_BK1_IO2 (XIP), PWR_EN7/PD2 = SDMMC1_CMD (SD card),
-#   PWR_EN6/PD6  = USART2_RX,            PWR_EN10/PE9 = TIM1_CH1 (PWM).
+# (PWR_EN channel number, port letter, pin bit). The 2 reserved channels are
+# excluded because app_drv_gpio intentionally refuses to drive them:
+#   PWR_EN7/PD2 = SDMMC1_CMD, PWR_EN15/PE2 = QUADSPI_BK1_IO2 / XIP.
 CHANNELS = [
     (1, "E", 1),    # PWR_EN1  PE1
-    (9, "E", 7),    # PWR_EN9  PE7
-    (11, "E", 13),  # PWR_EN11 PE13
     (2, "B", 9),    # PWR_EN2  PB9
+    (3, "B", 7),    # PWR_EN3  PB7
+    (4, "B", 5),    # PWR_EN4  PB5
     (5, "B", 3),    # PWR_EN5  PB3
+    (6, "D", 6),    # PWR_EN6  PD6
     (8, "D", 4),    # PWR_EN8  PD4
+    (9, "E", 7),    # PWR_EN9  PE7
+    (10, "E", 9),   # PWR_EN10 PE9
+    (11, "E", 13),  # PWR_EN11 PE13
+    (12, "E", 11),  # PWR_EN12 PE11
+    (13, "E", 12),  # PWR_EN13 PE12
+    (14, "E", 10),  # PWR_EN14 PE10
+    (16, "E", 8),   # PWR_EN16 PE8
 ]
 
 
@@ -102,7 +108,7 @@ def main() -> int:
     except OSError:
         pass
 
-    print(f"PASS: PWR_EN GPIO control verified on {len(CHANNELS)}/16 channels (PE9/EN10 excluded)")
+    print(f"PASS: PWR_EN GPIO control verified on {len(CHANNELS)}/16 channels (PD2/EN7 and PE2/EN15 excluded)")
     return EXIT_PASS
 
 

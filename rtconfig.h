@@ -478,7 +478,7 @@
 #define BSP_USING_QSPI
 #define BSP_USING_PWM
 #define BSP_USING_PWM1
-#define BSP_USING_PWM1_CH1
+#define BSP_USING_PWM1_CH4
 #define BSP_USING_ADC
 #define BSP_USING_ADC1
 #define BSP_USING_ADC3

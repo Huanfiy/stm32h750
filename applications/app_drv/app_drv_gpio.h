@@ -19,19 +19,16 @@ extern "C" {
  *     app_drv_gpio.disable(PWR_EN3);   // channel 3 power off
  *     app_drv_gpio.high(PWR_EN3);      // drive the pin HIGH, polarity-agnostic
  *
- * Pin map (per fixture wiring table):
+ * Pin map (per fixture wiring table; 14 GPIO-owned channels are enabled):
  *   EN1 PE1   EN2 PB9   EN3 PB7   EN4 PB5    EN5 PB3    EN6 PD6   EN7 PD2   EN8 PD4
  *   EN9 PE7   EN10 PE9  EN11 PE13 EN12 PE11  EN13 PE12  EN14 PE10 EN15 PE2  EN16 PE8
  *
- * RESERVED PINS — already owned by a peripheral on this board (see the .ioc).
+ * RESERVED PINS — not owned by app_drv_gpio on this board (see the .ioc).
  * This module leaves them alone; calls are silently ignored and read() gives -1:
- *   PWR_EN15 / PE2 = QUADSPI_BK1_IO2 — ALWAYS. The app runs from QSPI XIP, so
- *     PE2 is a live flash data line; driving it HardFaults the firmware. PE2 can
- *     NOT be a GPIO power-enable on this board — a hard wiring-table conflict.
- *   PWR_EN7  / PD2 = SDMMC1_CMD  — reserved while BSP_USING_SDIO (SD card).
- *   PWR_EN6  / PD6 = USART2_RX   — reserved while BSP_USING_UART2.
- *   PWR_EN10 / PE9 = TIM1_CH1    — reserved while BSP_USING_PWM.
- * The other 12 channels are free GPIO. See app_drv_gpio.c for details.
+ *   PWR_EN7  / PD2 = SDMMC1_CMD.
+ *   PWR_EN15 / PE2 = QUADSPI_BK1_IO2 / XIP data line.
+ * The other 14 channels are fixed GPIO outputs. PWM moved to TIM1_CH4/PE14, so
+ * PWR_EN10/PE9 is GPIO-owned.
  */
 typedef enum {
     PWR_EN1  = GET_PIN(E, 1),

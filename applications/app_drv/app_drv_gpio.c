@@ -21,40 +21,22 @@ static const app_drv_gpio_ch_t s_channels[APP_DRV_GPIO_CH_NUM] = {
 };
 
 /*
- * Pins that an on-chip peripheral already owns on THIS board (per the CubeMX
- * .ioc). Switching them to GPIO or driving them breaks that peripheral, so this
- * module leaves them in their alternate-function mode. Each entry is gated on
- * the BSP Kconfig flag that brings the peripheral up, so a channel frees itself
- * automatically if you disable the conflicting peripheral.
+ * Pins that are not part of the 14 GPIO-owned PWR_EN outputs on THIS board (per
+ * the CubeMX .ioc). The fixture keeps these two channel numbers reserved, so
+ * this module leaves them untouched and ignores write ops for them:
  *
- *   PWR_EN15 / PE2 = QUADSPI_BK1_IO2  — ALWAYS reserved. The app executes in
- *       place from the external QSPI flash (XIP @ 0x90000000); driving PE2 as
- *       GPIO corrupts instruction fetch and HardFaults the firmware. Hard
- *       hardware conflict — PE2 can never be a GPIO power-enable here.
- *   PWR_EN7  / PD2 = SDMMC1_CMD       — reserved while BSP_USING_SDIO (SD card).
- *   PWR_EN6  / PD6 = USART2_RX        — reserved while BSP_USING_UART2.
- *   PWR_EN10 / PE9 = TIM1_CH1         — reserved while BSP_USING_PWM.
+ *   PWR_EN7  / PD2 = SDMMC1_CMD.
+ *   PWR_EN15 / PE2 = QUADSPI_BK1_IO2 / XIP data line.
  *
- * Reserved channels are skipped at init and ignored by the write ops, so the
- * handle and the `pwr_en` command stay safe to call on every PWR_ENx value.
+ * PWM now uses TIM1_CH4 on PE14, so PWR_EN10/PE9 is a normal GPIO output.
  */
 static rt_bool_t ch_is_reserved(app_drv_gpio_ch_t ch)
 {
     switch (ch) {
-    case PWR_EN15:              /* PE2 = QUADSPI_BK1_IO2 — XIP data line */
-        return RT_TRUE;
-#ifdef BSP_USING_SDIO
     case PWR_EN7:               /* PD2 = SDMMC1_CMD */
         return RT_TRUE;
-#endif
-#ifdef BSP_USING_UART2
-    case PWR_EN6:               /* PD6 = USART2_RX */
+    case PWR_EN15:              /* PE2 = QUADSPI_BK1_IO2 / XIP data line */
         return RT_TRUE;
-#endif
-#ifdef BSP_USING_PWM
-    case PWR_EN10:              /* PE9 = TIM1_CH1 */
-        return RT_TRUE;
-#endif
     default:
         return RT_FALSE;
     }
@@ -125,7 +107,7 @@ static int app_drv_gpio_init(void)
         rt_base_t pin = (rt_base_t)s_channels[i];
 
         if (ch_is_reserved(s_channels[i])) {
-            continue;   /* leave QSPI/PWM-owned pins in their AF mode */
+            continue;
         }
 
         /* Latch the inactive level into ODR before switching to output so the
@@ -207,7 +189,7 @@ static int cmd_pwr_en(int argc, char **argv)
 
     if (ch_is_reserved(ch)) {
         char name[6];
-        rt_kprintf("pwr_en: PWR_EN%d (%s) is reserved (QSPI/PWM owns it) — ignored\n",
+        rt_kprintf("pwr_en: PWR_EN%d (%s) is reserved (not app_drv_gpio-owned) — ignored\n",
                    n, ch_pin_name(ch, name, sizeof(name)));
         return 0;
     }

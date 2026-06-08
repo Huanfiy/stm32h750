@@ -6,7 +6,7 @@
 #ifdef BSP_USING_PWM
 
 #define PWM_DEV_NAME            "pwm1"
-#define PWM_DEV_CHANNEL         1
+#define PWM_DEV_CHANNEL         4
 
 /* CubeMX: PSC=239, ARR=19999 @ 240 MHz TIM1 clk → 50 Hz (20 ms period). */
 #define PWM_DEFAULT_PERIOD_NS      20000000U
@@ -109,7 +109,7 @@ static void pwm_print_status(void)
     if (s_pwm.period_ns > 0U) {
         duty_permille = (uint32_t)((uint64_t)s_pwm.pulse_ns * 1000U / s_pwm.period_ns);
     }
-    rt_kprintf("pwm: PE9/TIM1_CH1  period=%u ns  pulse=%u ns  duty=%u.%u%%  %s\n",
+    rt_kprintf("pwm: PE14/TIM1_CH4  period=%u ns  pulse=%u ns  duty=%u.%u%%  %s\n",
                s_pwm.period_ns,
                s_pwm.pulse_ns,
                duty_permille / 10U,

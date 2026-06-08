@@ -13,7 +13,7 @@
 - 16 路电流通道 ADC 采集（10 Hz 整帧快照）；
 - CAN（FDCAN2，Classic 500 kbps）双向收发；
 - SD 卡 FATFS 自动挂载至 `/`；
-- TIM1 板级 PWM 输出（PE9）；
+- TIM1 板级 PWM 输出（PE14）；
 - finsh/MSH 命令行（USART1）。
 
 **尚未接入**（属项目目标，当前代码未实现编排层）：
@@ -84,7 +84,7 @@
 
 ### 4.5 PWM 输出
 
-- TIM1 CH1 @ `PE9`，默认 **50 Hz**（20 ms 周期），上电默认高电平 1.5 ms；
+- TIM1 CH4 @ `PE14`，默认 **50 Hz**（20 ms 周期），上电默认高电平 1.5 ms；
 - 接口（`applications/app_drv/app_drv_pwm.h`）：`set_duty(permille)`（0~1000 对应 0~100.0%）、`set_high_time(ns)`；
 - 调试命令：`pwm_info`、`pwm_duty <permille>`、`pwm_high <us>`。
 
