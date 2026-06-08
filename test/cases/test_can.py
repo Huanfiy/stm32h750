@@ -15,11 +15,12 @@ at both ends.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib import serial_term, zqwl_can  # noqa: E402
+from lib import jlink, serial_term, zqwl_can  # noqa: E402
 
 EXIT_PASS, EXIT_FAIL, EXIT_SKIP = 0, 1, 77
 
@@ -55,13 +56,32 @@ def test_tx(term: serial_term.Term, zq: zqwl_can.ZqwlCan) -> bool:
     """MCU transmits via msh `can_send`, ZQWL raw stream should contain the frame."""
     can_id, payload = 0x123, bytes([0xDE, 0xAD, 0xBE, 0xEF])
     # Settle: drain the ZQWL stream of stale heartbeats / prior frames.
-    zq.raw_drain(0.3)
+    zq.raw_drain(0.8)
     cmd = f"can_send 0x{can_id:03X} " + " ".join(f"{b:02X}" for b in payload)
     term.read(0.2)
-    term.send_line(cmd)
-    buf = zq.raw_drain(2.0)
+
+    # Start collecting before typing the msh command. The board can transmit
+    # immediately after CRLF, so reading only after send_line() returns can miss
+    # short bursts on some hosts/adapters.
+    chunks: list[bytes] = []
+
+    def _capture() -> None:
+        chunks.append(zq.raw_drain(8.0))
+
+    reader = threading.Thread(target=_capture, name="zqwl-can-capture", daemon=True)
+    reader.start()
+    time.sleep(0.05)
+    term.send_raw((cmd + "\r\n").encode())
+    term_buf = term.read(1.0)
+    reader.join(timeout=8.5)
+    if reader.is_alive():
+        print("[tx] WARN: ZQWL capture thread did not stop in time")
+    buf = b"".join(chunks)
     frames = zqwl_can.parse_frames(buf)
     print(f"[tx] MCU → ZQWL msh `{cmd}`")
+    print("--- MCU side ---")
+    sys.stdout.write(term_buf.decode(errors="replace"))
+    sys.stdout.write("\n")
     print(f"[tx] ZQWL parsed {len(frames)} frame(s): " +
           ", ".join(f"0x{cid:03X}={_hex_bytes(pl)}" for cid, pl, _ in frames))
     for cid, pl, _ in frames:
@@ -74,6 +94,12 @@ def test_tx(term: serial_term.Term, zq: zqwl_can.ZqwlCan) -> bool:
 
 
 def main() -> int:
+    if jlink.have_jlink():
+        try:
+            jlink.reset_run()
+            time.sleep(0.8)
+        except jlink.JLinkUnavailable:
+            pass
     if not serial_term.device_present():
         print(f"SKIP: serial device {serial_term.DEFAULT_DEV} not present")
         return EXIT_SKIP

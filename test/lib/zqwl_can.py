@@ -17,6 +17,7 @@ for the authoritative protocol spec.
 from __future__ import annotations
 
 import glob
+import errno
 import os
 import select
 import termios
@@ -55,6 +56,29 @@ def _open(path: str) -> int:
     return fd
 
 
+def _write_all(fd: int, data: bytes, timeout_s: float = 2.0) -> None:
+    end = time.time() + timeout_s
+    offset = 0
+    while offset < len(data):
+        try:
+            written = os.write(fd, data[offset:])
+        except BlockingIOError as exc:
+            if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                raise
+            written = 0
+        except InterruptedError:
+            written = 0
+        if written > 0:
+            offset += written
+            continue
+        remaining = end - time.time()
+        if remaining <= 0:
+            raise TimeoutError("ZQWL serial write timeout")
+        _r, writable, _e = select.select([], [fd], [], remaining)
+        if not writable and time.time() >= end:
+            raise TimeoutError("ZQWL serial write timeout")
+
+
 def _cfg_packet(func: int, rw: int, data: bytes = b"") -> bytes:
     return bytes([0x49, 0x3B, func, rw]) + bytes(data).ljust(16, b"\x00") + bytes([0x45, 0x2E])
 
@@ -85,6 +109,23 @@ def _drain(fd: int, seconds: float) -> bytes:
                 continue
             if chunk:
                 buf.extend(chunk)
+    return bytes(buf)
+
+
+def _drain_until_frame(fd: int, seconds: float) -> bytes:
+    end = time.time() + seconds
+    buf = bytearray()
+    while time.time() < end:
+        r, _, _ = select.select([fd], [], [], max(0.0, end - time.time()))
+        if r:
+            try:
+                chunk = os.read(fd, 4096)
+            except BlockingIOError:
+                continue
+            if chunk:
+                buf.extend(chunk)
+                if parse_frames(bytes(buf)):
+                    break
     return bytes(buf)
 
 
@@ -143,19 +184,19 @@ class ZqwlCan:
         self.close()
 
     def _init(self, bitrate_code: int) -> None:
-        os.write(self.fd, _cfg_packet(0x40, 0x52))                                    # device info (probes link)
+        _write_all(self.fd, _cfg_packet(0x40, 0x52))                                  # device info (probes link)
         _drain(self.fd, 0.15)
-        os.write(self.fd, _cfg_packet(0x42, 0x57, bytes([0x00, 0x00, bitrate_code]))) # CAN0 bitrate
+        _write_all(self.fd, _cfg_packet(0x42, 0x57, bytes([0x00, 0x00, bitrate_code]))) # CAN0 bitrate
         _drain(self.fd, 0.05)
-        os.write(self.fd, _cfg_packet(0x44, 0x57, bytes([0x00, 0x00, 0x01])))         # apply (no flash) + open CAN0
+        _write_all(self.fd, _cfg_packet(0x44, 0x57, bytes([0x00, 0x00, 0x01])))       # apply (no flash) + open CAN0
         _drain(self.fd, 0.3)
 
     def send(self, can_id: int, payload: bytes | Iterable[int], ext: bool = False, fd_proto: bool = False) -> None:
         payload = bytes(payload)
-        os.write(self.fd, _frame_packet(can_id, payload, ext, fd_proto))
+        _write_all(self.fd, _frame_packet(can_id, payload, ext, fd_proto))
 
     def recv(self, seconds: float) -> list[tuple[int, bytes, bool]]:
-        return parse_frames(_drain(self.fd, seconds))
+        return parse_frames(_drain_until_frame(self.fd, seconds))
 
     def raw_drain(self, seconds: float) -> bytes:
         return _drain(self.fd, seconds)

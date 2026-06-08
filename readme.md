@@ -12,17 +12,17 @@
 
 - 16 路电流通道 ADC 采集（10 Hz 整帧快照）；
 - CAN（FDCAN2，Classic 500 kbps）双向收发；
+- 老化测试业务 CAN 协议最小闭环：配置 `0x100` ACK、通道绑定 `0x110/0x111`、开始/停止/复位 `0x120` ACK、运行周期上报 `0x200`、低/高电流事件 `0x210`；
 - SD 卡 FATFS 自动挂载至 `/`；
 - TIM1 板级 PWM 输出（PE14）；
 - finsh/MSH 命令行（USART1）。
 
 **尚未接入**（属项目目标，当前代码未实现编排层）：
 
-- 采集 → SD 落盘 → 定时 CAN 上报的应用主线程：`applications/main.c` 当前仍为 LED 闪烁占位，三条数据通路各自就绪但未被一条业务线程串起来；
+- 完整老化测试业务编排：当前已可按上位机命令周期上报 `0x200` 并发送低/高电流事件 `0x210`，但 PASS/FAIL 判定、通道电源控制、SD 落盘和 MES 结果关联仍由上位机侧闭环；
 - ADC 原始值 → 实际电流（A）的标定与换算：采集层只给出每路的原始码值与对应电压（mV），分流/放大系数与换算尚未写入；
-- CAN 上行状态帧的协议定义：帧 ID 分配、字段布局、上报周期未固化，发送 API 已具备。
 
-以上三项是下一阶段的工作面，底层驱动已按可被直接调用的形态备好。
+以上两项是下一阶段的工作面，底层驱动与首版协议 ACK/上报通路已按可被直接调用的形态备好。
 
 ## 2. 硬件平台
 
@@ -71,18 +71,33 @@
 - 应用接口见 `applications/app_drv/app_drv_can.h`；
 - 调试命令：`can_send <hexid> [b0..b7]`、`can_sniff [n]`。
 
-### 4.3 数据落盘（SD 卡）
+### 4.3 老化测试业务 CAN 协议
+
+业务协议实现位于 `applications/app_proto.c`，协议字段以顶层仓 `docs/can_protocol.md` 为准。
+
+- Host → MCU：
+  - `0x100` 基础配置，下位机返回 `0x180 ref=0x00`；
+  - `0x110` 通道绑定头，下位机返回 `0x180 ref=0x10`；
+  - `0x111` SN 分片，首版不逐帧 ACK；
+  - `0x120` 测试控制命令，下位机返回 `0x180 ref=0x20`。
+- MCU → Host：
+  - `0x180` ACK/NACK；
+  - `0x200` 周期数据上报，当前电流字段暂以 ADC mV 近似填充，ADC raw 字段填原始采样值；
+  - `0x210` 异常事件，当前在电流低于/高于配置窗口时每通道发送一次事件并在 `0x200` 中带错误码。
+- 调试命令：`ag_proto` 打印协议配置、运行状态和计数器；`ag_proto ack` 手动发送一帧配置 ACK 便于 CAN 侧抓包。
+
+### 4.4 数据落盘（SD 卡）
 
 - 文件系统：FATFS/ELM，开机由 `fs_mnt` 线程异步等待 `sd0` 枚举完成后挂载至 `/`；
 - 卡缺失或挂载失败仅打印告警，不阻塞启动与 msh；
 - 落盘文件的命名、字段格式属应用编排层，当前未实现（见 §1）。
 
-### 4.4 调试串口与命令行
+### 4.5 调试串口与命令行
 
 - USART1：`PB14`(RX)/`PB15`(TX)，**115200 8N1**，承载 RT-Thread finsh/MSH；
-- 已注册业务命令：`adc_dump` / `can_send` / `can_sniff` / `pwm_info` / `pwm_duty` / `pwm_high`。
+- 已注册业务命令：`adc_dump` / `can_send` / `can_sniff` / `ag_proto` / `pwr_en` / `pwm_info` / `pwm_duty` / `pwm_high`。
 
-### 4.5 PWM 输出
+### 4.6 PWM 输出
 
 - TIM1 CH4 @ `PE14`，默认 **50 Hz**（20 ms 周期），上电默认高电平 1.5 ms；
 - 接口（`applications/app_drv/app_drv_pwm.h`）：`set_duty(permille)`（0~1000 对应 0~100.0%）、`set_high_time(ns)`；
@@ -125,6 +140,8 @@
 ```sh
 python3 test/run_all.py            # 顺序执行全部 case 并输出汇总
 python3 test/cases/test_adc.py     # 单独执行某个 case
+python3 test/cases/test_can_diagnostics.py  # CAN 物理层诊断
+python3 test/cases/test_can_protocol.py     # 业务 CAN 协议闭环
 ```
 
 用例退码遵循 autotools 约定：`0=PASS`、`1=FAIL`、`77=SKIP`。硬件缺失时对应 case 自动 SKIP，不会让整套 FAIL。

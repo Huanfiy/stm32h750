@@ -20,6 +20,11 @@ struct app_drv_can {
 
 static struct app_drv_can g_can;
 
+__attribute__((weak)) void app_drv_can_on_rx_frame(const app_drv_can_frame_t *f)
+{
+    (void)f;
+}
+
 static uint32_t fdcan_dlc_encode(uint8_t bytes)
 {
     /* Classic CAN: 0..8 bytes, HAL constants FDCAN_DLC_BYTES_n are bit-shifted. */
@@ -121,15 +126,21 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t flags)
     while (HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO0) > 0U) {
         if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &hdr, data) != HAL_OK) break;
 
-        rt_uint16_t next = (g_can.rx_head + 1U) % CAN_RX_RING_SZ;
-        if (next == g_can.rx_tail) break;   /* ring full — drop newer frame */
+        app_drv_can_frame_t frame = {0};
+        frame.id  = hdr.Identifier;
+        frame.ide = (hdr.IdType == FDCAN_EXTENDED_ID) ? 1U : 0U;
+        frame.rtr = (hdr.RxFrameType == FDCAN_REMOTE_FRAME) ? 1U : 0U;
+        frame.dlc = fdcan_dlc_decode(hdr.DataLength);
+        memcpy(frame.data, data, sizeof(frame.data));
 
-        app_drv_can_frame_t *f = &g_can.rx_ring[g_can.rx_head];
-        f->id  = hdr.Identifier;
-        f->ide = (hdr.IdType == FDCAN_EXTENDED_ID) ? 1U : 0U;
-        f->rtr = (hdr.RxFrameType == FDCAN_REMOTE_FRAME) ? 1U : 0U;
-        f->dlc = fdcan_dlc_decode(hdr.DataLength);
-        memcpy(f->data, data, sizeof(f->data));
+        app_drv_can_on_rx_frame(&frame);
+
+        rt_uint16_t next = (g_can.rx_head + 1U) % CAN_RX_RING_SZ;
+        if (next == g_can.rx_tail) {
+            continue;   /* debug ring full; protocol observer already saw the frame */
+        }
+
+        g_can.rx_ring[g_can.rx_head] = frame;
         g_can.rx_head = next;
     }
     rt_sem_release(&g_can.rx_sem);

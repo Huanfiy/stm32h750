@@ -14,7 +14,9 @@ test/
 │   ├── test_swd.py           # J-Link halt + PC 落在 QSPI XIP 区
 │   ├── test_boot.py          # 重启后串口看到 RT-Thread banner + msh 提示符
 │   ├── test_adc.py           # msh `adc_dump` 输出 16 路、值在量程内
-│   └── test_can.py           # ZQWL ↔ MCU 双向收发，ID + 数据完全一致
+│   ├── test_can.py           # ZQWL ↔ MCU 双向收发，ID + 数据完全一致
+│   ├── test_can_protocol.py  # 业务 CAN 协议配置/绑定/开始 ACK + 周期上报
+│   └── test_can_diagnostics.py # CAN 物理层失败时读取 FDCAN2 错误寄存器
 └── run_all.py                # 按顺序跑全部 case，输出汇总表
 ```
 
@@ -31,6 +33,8 @@ test/
 ```
 python3 test/run_all.py             # 全部 case + 汇总
 python3 test/cases/test_adc.py      # 跑单个 case
+python3 test/cases/test_can_protocol.py  # 业务 CAN 协议闭环
+python3 test/cases/test_can_diagnostics.py  # CAN 无收发时看 Bus-Off / TEC / LEC
 ```
 
 ## 写新 case 的模板

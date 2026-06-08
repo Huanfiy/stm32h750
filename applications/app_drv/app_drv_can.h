@@ -25,6 +25,13 @@ app_drv_can_t app_drv_can_instance(void);
 int           app_drv_can_send(app_drv_can_t h, const app_drv_can_frame_t *f, rt_int32_t timeout_ms);
 int           app_drv_can_recv(app_drv_can_t h, app_drv_can_frame_t *f, rt_int32_t timeout_ms);
 
+/* Optional observer hook called from the FDCAN RX interrupt for every received
+ * frame before best-effort insertion into the debug receive ring. Modules may
+ * implement this weak symbol to mirror selected frames into their own queues
+ * without stealing frames from `can_sniff`.
+ */
+void          app_drv_can_on_rx_frame(const app_drv_can_frame_t *f);
+
 #ifdef __cplusplus
 }
 #endif
