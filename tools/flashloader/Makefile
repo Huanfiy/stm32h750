@@ -19,7 +19,7 @@ OUT := STM32H750VB_W25Q64.FLM
 
 all: $(OUT)
 
-$(OUT): $(SRC) flashloader.lds
+$(OUT): $(SRC) FlashOS.h flashloader.lds
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC)
 	@echo "--- Sections ---"
 	@$(OBJDUMP) -h $@ | grep -E "PrgCode|PrgData|DevDscr"

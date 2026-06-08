@@ -24,7 +24,7 @@ typedef uint32_t U32;
 #define EXT32BIT    4
 #define EXTSPI      5
 
-#define SECTOR_NUM  512
+#define SECTOR_NUM  2
 
 struct FlashSectors {
     U32 szSector;       /* sector size in bytes              */

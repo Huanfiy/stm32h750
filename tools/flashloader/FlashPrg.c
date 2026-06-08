@@ -71,11 +71,32 @@
 #define SR2_QE          (1U << 1)
 
 /* ---------- Helpers ---------- */
+#define QSPI_WAIT_SPINS 1000000U
+
 static U32 qspi_mmap_active;
 
-static void qspi_wait_busy(void)
+static int qspi_wait_idle(void)
 {
-    while (QSPI_SR & SR_BUSY) { }
+    for (U32 i = 0; i < QSPI_WAIT_SPINS; i++) {
+        if ((QSPI_SR & SR_BUSY) == 0U) {
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int qspi_wait_complete(void)
+{
+    for (U32 i = 0; i < QSPI_WAIT_SPINS; i++) {
+        U32 sr = QSPI_SR;
+        if (sr & SR_TEF) {
+            return -1;
+        }
+        if (sr & SR_TCF) {
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static void qspi_clear_flags(void)
@@ -86,7 +107,7 @@ static void qspi_clear_flags(void)
 static void qspi_abort(void)
 {
     QSPI_CR |= (1U << 1);
-    while (QSPI_CR & (1U << 1)) { }
+    for (U32 i = 0; (QSPI_CR & (1U << 1)) && i < QSPI_WAIT_SPINS; i++) { }
     qspi_clear_flags();
     qspi_mmap_active = 0;
 }
@@ -103,6 +124,32 @@ static U32 qspi_fifo_level(void)
     return (QSPI_SR & SR_FLEVEL_MASK) >> SR_FLEVEL_SHIFT;
 }
 
+static int qspi_wait_fifo_at_most(U32 level)
+{
+    for (U32 i = 0; i < QSPI_WAIT_SPINS; i++) {
+        if (QSPI_SR & SR_TEF) {
+            return -1;
+        }
+        if (qspi_fifo_level() <= level) {
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int qspi_wait_fifo_data(void)
+{
+    for (U32 i = 0; i < QSPI_WAIT_SPINS; i++) {
+        if (QSPI_SR & SR_TEF) {
+            return -1;
+        }
+        if (qspi_fifo_level() != 0U) {
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static U32 load_le32(const U8 *p)
 {
     return ((U32)p[0]) | ((U32)p[1] << 8) | ((U32)p[2] << 16) | ((U32)p[3] << 24);
@@ -112,12 +159,10 @@ static U32 load_le32(const U8 *p)
 static int qspi_cmd(U8 opcode)
 {
     qspi_prepare_indirect();
-    qspi_wait_busy();
+    if (qspi_wait_idle() != 0) return -1;
     qspi_clear_flags();
     QSPI_CCR = CCR_FMODE_WR | CCR_IMODE_1L | opcode;
-    while (!(QSPI_SR & SR_TCF)) {
-        if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -1; }
-    }
+    if (qspi_wait_complete() != 0) { qspi_clear_flags(); return -1; }
     qspi_clear_flags();
     return 0;
 }
@@ -126,7 +171,7 @@ static int qspi_cmd(U8 opcode)
 static int qspi_cmd_addr_write(U8 opcode, U32 addr, const U8 *data, U32 len, U32 data_mode)
 {
     qspi_prepare_indirect();
-    qspi_wait_busy();
+    if (qspi_wait_idle() != 0) return -1;
     qspi_clear_flags();
 
     U32 ccr = CCR_FMODE_WR | CCR_IMODE_1L | CCR_ADMODE_1L | CCR_ADSIZE_24 | opcode;
@@ -139,22 +184,16 @@ static int qspi_cmd_addr_write(U8 opcode, U32 addr, const U8 *data, U32 len, U32
 
     U32 i = 0;
     while (i + 4 <= len) {
-        while (qspi_fifo_level() > 28U) {
-            if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -2; }
-        }
+        if (qspi_wait_fifo_at_most(28U) != 0) { qspi_clear_flags(); return -1; }
         QSPI_DR = load_le32(data + i);
         i += 4;
     }
     while (i < len) {
-        while (qspi_fifo_level() >= 32U) {
-            if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -2; }
-        }
+        if (qspi_wait_fifo_at_most(31U) != 0) { qspi_clear_flags(); return -1; }
         QSPI_DR_BYTE = data[i];
         i++;
     }
-    while (!(QSPI_SR & SR_TCF)) {
-        if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -3; }
-    }
+    if (qspi_wait_complete() != 0) { qspi_clear_flags(); return -1; }
     qspi_clear_flags();
     return 0;
 }
@@ -163,19 +202,15 @@ static int qspi_cmd_addr_write(U8 opcode, U32 addr, const U8 *data, U32 len, U32
 static int qspi_read_reg(U8 opcode, U8 *out, U32 len)
 {
     qspi_prepare_indirect();
-    qspi_wait_busy();
+    if (qspi_wait_idle() != 0) return -1;
     qspi_clear_flags();
     QSPI_DLR = len - 1;
     QSPI_CCR = CCR_FMODE_RD | CCR_IMODE_1L | CCR_DMODE_1L | opcode;
     for (U32 i = 0; i < len; i++) {
-        while (!(QSPI_SR & SR_FTF)) {
-            if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -1; }
-        }
+        if (qspi_wait_fifo_data() != 0) { qspi_clear_flags(); return -1; }
         out[i] = QSPI_DR_BYTE;
     }
-    while (!(QSPI_SR & SR_TCF)) {
-        if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return -2; }
-    }
+    if (qspi_wait_complete() != 0) { qspi_clear_flags(); return -1; }
     qspi_clear_flags();
     return 0;
 }
@@ -280,17 +315,13 @@ int Init(U32 adr, U32 clk, U32 fnc)
 
         /* WRSR2 takes no address, single data byte on 1 line. */
         U8 v = (U8)(sr2 | SR2_QE);
-        qspi_wait_busy();
+        if (qspi_wait_idle() != 0) return 5;
         qspi_clear_flags();
         QSPI_DLR = 0;
         QSPI_CCR = CCR_FMODE_WR | CCR_IMODE_1L | CCR_DMODE_1L | CMD_WRSR2;
-        while (!(QSPI_SR & SR_FTF)) {
-            if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return 5; }
-        }
+        if (qspi_wait_fifo_at_most(31U) != 0) { qspi_clear_flags(); return 5; }
         QSPI_DR_BYTE = v;
-        while (!(QSPI_SR & SR_TCF)) {
-            if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return 6; }
-        }
+        if (qspi_wait_complete() != 0) { qspi_clear_flags(); return 6; }
         qspi_clear_flags();
         if (wait_wip_clear(200000) != 0) return 7;
     }
@@ -318,13 +349,11 @@ int EraseSector(U32 adr)
 
     /* 64 KB block erase. The flash device descriptor advertises 64 KB sectors
      * so J-Link aligns affected ranges before calling us. */
-    qspi_wait_busy();
+    if (qspi_wait_idle() != 0) return 2;
     qspi_clear_flags();
     QSPI_CCR = CCR_FMODE_WR | CCR_IMODE_1L | CCR_ADMODE_1L | CCR_ADSIZE_24 | CMD_BE_64K;
     QSPI_AR  = off;
-    while (!(QSPI_SR & SR_TCF)) {
-        if (QSPI_SR & SR_TEF) { qspi_clear_flags(); return 2; }
-    }
+    if (qspi_wait_complete() != 0) { qspi_clear_flags(); return 2; }
     qspi_clear_flags();
 
     /* W25Q64 64 KB block erase: tBE1 max ~2s. */
@@ -369,7 +398,7 @@ static int qspi_enter_memory_mapped_read(void)
         return 0;
     }
 
-    qspi_wait_busy();
+    if (qspi_wait_idle() != 0) return -1;
     qspi_clear_flags();
 
     /* Same read mode as the bootloader: 0xEB 1-4-4, 8-bit mode byte on 4
