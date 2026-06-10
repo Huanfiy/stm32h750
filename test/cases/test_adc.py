@@ -7,7 +7,10 @@ Sends `adc_dump` on the msh console and expects 16 lines of the form
 - all 16 channels report (ADC1's 14ch + ADC3's 2ch);
 - PWR_EN status is readable as 0/1, or '-' for reserved channels;
 - raw values stay within 16-bit range and mA stays within the INA240A2
-  + 50 mohm shunt ADC range.
+  + 50 mohm shunt ADC range;
+- the VREFINT self-check channel reads ~1.21 V. VREFINT needs >= 4.3 us of
+  sampling, so this doubles as a regression guard for the per-channel
+  sampling time (an 1.5-cycle config reads VREFINT far below 1 V).
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ MAX_CURRENT_MA = 1320
 RESERVED_PWR_IDX = {6, 14}
 
 LINE_RE = re.compile(rb"pwr=([01-])\s+ch(\d{2})\s+(P[A-Z]\d):\s+raw=\s*(\d+)\s+mA=\s*(\d+)")
+VREF_RE = re.compile(rb"vrefint:\s+raw=\s*(\d+)\s+mV=\s*(\d+)")
+VREFINT_MV_MIN, VREFINT_MV_MAX = 1140, 1290
 
 
 def main() -> int:
@@ -36,7 +41,7 @@ def main() -> int:
         with serial_term.Term() as term:
             term.read(0.3)            # drain any stale bytes
             term.send_line("adc_dump")
-            buf, ok = term.expect(rb"ch15\s+P[A-Z]\d:.*\n", timeout=3.0)
+            buf, ok = term.expect(rb"vrefint:.*\n", timeout=3.0)
     except OSError as exc:
         print(f"SKIP: serial open failed: {exc}")
         return EXIT_SKIP
@@ -46,7 +51,17 @@ def main() -> int:
     sys.stdout.write("\n--- end ---\n")
 
     if not ok:
-        print("FAIL: did not see all 16 channels within 3 s")
+        print("FAIL: did not see 16 channels + vrefint within 3 s")
+        return EXIT_FAIL
+
+    vref = VREF_RE.search(buf)
+    if not vref:
+        print("FAIL: vrefint line missing")
+        return EXIT_FAIL
+    vref_mv = int(vref.group(2))
+    if not (VREFINT_MV_MIN <= vref_mv <= VREFINT_MV_MAX):
+        print(f"FAIL: vrefint {vref_mv} mV outside "
+              f"[{VREFINT_MV_MIN}, {VREFINT_MV_MAX}] (sampling time regression?)")
         return EXIT_FAIL
 
     rows = LINE_RE.findall(buf)
@@ -76,7 +91,7 @@ def main() -> int:
             print(f"FAIL: mA {ma} > range {MAX_CURRENT_MA} (ch{idx:02d})")
             return EXIT_FAIL
 
-    print("PASS: 16/16 channels reported within bounds")
+    print(f"PASS: 16/16 channels reported within bounds, vrefint={vref_mv} mV")
     return EXIT_PASS
 
 

@@ -6,7 +6,9 @@
 #include <string.h>
 
 #define ADC1_CH_COUNT       14U
-#define ADC3_CH_COUNT       2U
+/* PC3_C, PC2_C + VREFINT self-check (needs >= 4.3us sampling, so it doubles
+ * as a closed-loop guard against the sampling time regressing). */
+#define ADC3_CH_COUNT       3U
 #define ADC_VREF_MV         3300U
 #define ADC_MAX_RAW         65535U
 #define INA240A2_GAIN       50U
@@ -28,6 +30,7 @@ static TIM_HandleTypeDef htim6;
 static uint16_t adc1_dma_buf[ADC1_CH_COUNT] __attribute__((section(".dma_buffer"), aligned(32)));
 static uint16_t adc3_dma_buf[ADC3_CH_COUNT] __attribute__((section(".ram_d3"), aligned(32)));
 static uint16_t adc_snapshot[APP_DRV_ADC_TOTAL_CH];
+static uint16_t adc_vrefint_raw;
 static struct rt_semaphore adc_sem;
 static rt_bool_t adc_inited;
 
@@ -69,7 +72,10 @@ static rt_err_t adc1_configure(void)
     multimode.Mode = ADC_MODE_INDEPENDENT;
     if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK) return -RT_ERROR;
 
-    sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+    /* 100Hz scan leaves a huge budget (14ch x 819cyc @ 37.5MHz = 306us per
+     * frame), so use the max sampling time: the INA240 outputs go through
+     * per-channel RC networks that do not settle in 1.5 cycles (40ns). */
+    sConfig.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;
     sConfig.SingleDiff = ADC_SINGLE_ENDED;
     sConfig.OffsetNumber = ADC_OFFSET_NONE;
     sConfig.Offset = 0;
@@ -103,7 +109,7 @@ static rt_err_t adc3_configure(void)
     hadc3.Init.OversamplingMode = DISABLE;
     if (HAL_ADC_Init(&hadc3) != HAL_OK) return -RT_ERROR;
 
-    sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+    sConfig.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;
     sConfig.SingleDiff = ADC_SINGLE_ENDED;
     sConfig.OffsetNumber = ADC_OFFSET_NONE;
     sConfig.Offset = 0;
@@ -115,6 +121,10 @@ static rt_err_t adc3_configure(void)
 
     sConfig.Channel = ADC_CHANNEL_0;       /* PC2 → snapshot[15] */
     sConfig.Rank = ADC_REGULAR_RANK_2;
+    if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK) return -RT_ERROR;
+
+    sConfig.Channel = ADC_CHANNEL_VREFINT; /* ~1.21V internal reference */
+    sConfig.Rank = ADC_REGULAR_RANK_3;
     if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK) return -RT_ERROR;
 
     return RT_EOK;
@@ -155,7 +165,8 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
     if (hadc->Instance == ADC3) {
         invalidate_dcache(adc3_dma_buf, sizeof(adc3_dma_buf));
-        memcpy(&adc_snapshot[14], adc3_dma_buf, sizeof(adc3_dma_buf));
+        memcpy(&adc_snapshot[14], adc3_dma_buf, 2U * sizeof(adc3_dma_buf[0]));
+        adc_vrefint_raw = adc3_dma_buf[2];
     } else if (hadc->Instance == ADC1) {
         /* ADC1 has 14ch vs ADC3's 2ch at the same clock — ADC1 always finishes
          * later within one TIM6 trigger, so we use its completion as the
@@ -229,6 +240,11 @@ uint32_t app_drv_adc_raw_to_mv(uint16_t raw)
     return ((uint32_t)raw * ADC_VREF_MV) / ADC_MAX_RAW;
 }
 
+uint16_t app_drv_adc_get_vrefint_raw(void)
+{
+    return adc_vrefint_raw;
+}
+
 uint32_t app_drv_adc_raw_to_current_ma(uint16_t raw)
 {
     uint32_t mv = app_drv_adc_raw_to_mv(raw);
@@ -267,6 +283,8 @@ static int cmd_adc_dump(int argc, char **argv)
         rt_kprintf("pwr=%s  ch%02u %s: raw=%5u  mA=%4u\n",
                    pwr_state, i, pin_names[i], s[i], app_drv_adc_raw_to_current_ma(s[i]));
     }
+    uint16_t vref = app_drv_adc_get_vrefint_raw();
+    rt_kprintf("vrefint: raw=%5u  mV=%4u\n", vref, app_drv_adc_raw_to_mv(vref));
     (void)argc; (void)argv;
     return 0;
 }

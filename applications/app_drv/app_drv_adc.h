@@ -19,6 +19,7 @@ extern "C" {
 int      app_drv_adc_init(void);
 int      app_drv_adc_wait(rt_int32_t timeout_ms);
 void     app_drv_adc_get_snapshot(uint16_t out[APP_DRV_ADC_TOTAL_CH]);
+uint16_t app_drv_adc_get_vrefint_raw(void);
 uint32_t app_drv_adc_raw_to_mv(uint16_t raw);
 uint32_t app_drv_adc_raw_to_current_ma(uint16_t raw);
 
