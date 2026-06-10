@@ -13,6 +13,7 @@ readonly BUILD_DIR="build"
 readonly PROJECT_NAME="${PROJECT_NAME:-rt-thread}"
 readonly ELF_FILE="${BUILD_DIR}/${PROJECT_NAME}.elf"
 readonly BIN_FILE="${BUILD_DIR}/${PROJECT_NAME}.bin"
+readonly COMPILE_COMMANDS_EVENTS_FILE="compile_commands.events.json"
 
 readonly BOOT_DIR="bootloader"
 readonly BOOT_BUILD_DIR="${BOOT_DIR}/build"
@@ -46,6 +47,16 @@ check_toolchain() {
     export RTT_EXEC_PATH
 }
 
+cleanup_compile_commands_events() {
+    rm -f "$COMPILE_COMMANDS_EVENTS_FILE"
+}
+
+cleanup_compile_commands_events_and_exit() {
+    local rc="$1"
+    cleanup_compile_commands_events
+    exit "$rc"
+}
+
 update_compile_commands() {
     if [[ -f "compile_commands.json" ]] && grep -q '"output"' "compile_commands.json"; then
         mkdir -p .vscode
@@ -54,6 +65,7 @@ update_compile_commands() {
     else
         [[ -f "compile_commands.json" ]] && rm -f compile_commands.json
     fi
+    cleanup_compile_commands_events
 }
 
 # ==============================================================================
@@ -245,6 +257,10 @@ EOF
 # Main
 # ==============================================================================
 main() {
+    trap cleanup_compile_commands_events EXIT
+    trap 'cleanup_compile_commands_events_and_exit 130' INT
+    trap 'cleanup_compile_commands_events_and_exit 143' TERM
+
     [[ $# -eq 0 ]] && { show_help; exit 1; }
 
     local cmd=""
