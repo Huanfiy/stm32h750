@@ -1,4 +1,5 @@
 #include "app_drv_adc.h"
+#include "app_drv_gpio.h"
 
 #include <board.h>
 #include <rtdevice.h>
@@ -8,6 +9,10 @@
 #define ADC3_CH_COUNT       2U
 #define ADC_VREF_MV         3300U
 #define ADC_MAX_RAW         65535U
+#define INA240A2_GAIN       50U
+#define SHUNT_RESISTOR_MOHM 50U
+/* Set to the measured INA240 REF voltage when REF is biased above GND. */
+#define INA240_REF_MV       0U
 
 #define ADC_IRQ_PRIORITY    5U
 
@@ -224,6 +229,16 @@ uint32_t app_drv_adc_raw_to_mv(uint16_t raw)
     return ((uint32_t)raw * ADC_VREF_MV) / ADC_MAX_RAW;
 }
 
+uint32_t app_drv_adc_raw_to_current_ma(uint16_t raw)
+{
+    uint32_t mv = app_drv_adc_raw_to_mv(raw);
+
+    if (mv <= INA240_REF_MV) {
+        return 0;
+    }
+    return ((mv - INA240_REF_MV) * 1000U) / (INA240A2_GAIN * SHUNT_RESISTOR_MOHM);
+}
+
 #ifdef RT_USING_FINSH
 #include <finsh.h>
 
@@ -233,6 +248,12 @@ static int cmd_adc_dump(int argc, char **argv)
         "PA6", "PC4", "PB1", "PA7", "PC5", "PB0", "PC0", "PC1",
         "PA2", "PA3", "PA0", "PA1", "PA4", "PA5", "PC3", "PC2",
     };
+    static const app_drv_gpio_ch_t pwr_channels[APP_DRV_ADC_TOTAL_CH] = {
+        PWR_EN1,  PWR_EN2,  PWR_EN3,  PWR_EN4,
+        PWR_EN5,  PWR_EN6,  PWR_EN7,  PWR_EN8,
+        PWR_EN9,  PWR_EN10, PWR_EN11, PWR_EN12,
+        PWR_EN13, PWR_EN14, PWR_EN15, PWR_EN16,
+    };
     if (app_drv_adc_wait(1000) != RT_EOK) {
         rt_kprintf("adc: timeout waiting for snapshot\n");
         return -1;
@@ -240,8 +261,11 @@ static int cmd_adc_dump(int argc, char **argv)
     uint16_t s[APP_DRV_ADC_TOTAL_CH];
     app_drv_adc_get_snapshot(s);
     for (uint32_t i = 0; i < APP_DRV_ADC_TOTAL_CH; i++) {
-        rt_kprintf("ch%02u %s: raw=%5u  mv=%4u\n",
-                   i, pin_names[i], s[i], app_drv_adc_raw_to_mv(s[i]));
+        int pwr = app_drv_gpio.read(pwr_channels[i]);
+        const char *pwr_state = (pwr < 0) ? "-" : (pwr ? "1" : "0");
+
+        rt_kprintf("pwr=%s  ch%02u %s: raw=%5u  mA=%4u\n",
+                   pwr_state, i, pin_names[i], s[i], app_drv_adc_raw_to_current_ma(s[i]));
     }
     (void)argc; (void)argv;
     return 0;

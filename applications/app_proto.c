@@ -395,7 +395,7 @@ static void monitor_sample(void)
             continue;
         }
         raw[ch - 1U] = adc[ch - 1U];
-        current[ch - 1U] = (rt_uint16_t)app_drv_adc_raw_to_mv(raw[ch - 1U]);
+        current[ch - 1U] = (rt_uint16_t)app_drv_adc_raw_to_current_ma(raw[ch - 1U]);
         state[ch - 1U] = 1U;
 
         s_last_raw[ch - 1U] = raw[ch - 1U];

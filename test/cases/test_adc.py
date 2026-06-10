@@ -2,10 +2,12 @@
 """ADC 16-channel closed-loop test.
 
 Sends `adc_dump` on the msh console and expects 16 lines of the form
-`chNN <PIN>: raw=#### mv=####`. Validates that:
+`pwr=<0|1|-> chNN <PIN>: raw=#### mA=####`. Validates that:
 - the snapshot semaphore releases at all (driver init + DMA + TIM6 work);
 - all 16 channels report (ADC1's 14ch + ADC3's 2ch);
-- raw values stay within 16-bit range and mV ≤ 3300.
+- PWR_EN status is readable as 0/1, or '-' for reserved channels;
+- raw values stay within 16-bit range and mA stays within the INA240A2
+  + 50 mohm shunt ADC range.
 """
 
 from __future__ import annotations
@@ -19,7 +21,10 @@ from lib import serial_term  # noqa: E402
 
 EXIT_PASS, EXIT_FAIL, EXIT_SKIP = 0, 1, 77
 
-LINE_RE = re.compile(rb"ch(\d{2})\s+(P[A-Z]\d):\s+raw=\s*(\d+)\s+mv=\s*(\d+)")
+MAX_CURRENT_MA = 1320
+RESERVED_PWR_IDX = {6, 14}
+
+LINE_RE = re.compile(rb"pwr=([01-])\s+ch(\d{2})\s+(P[A-Z]\d):\s+raw=\s*(\d+)\s+mA=\s*(\d+)")
 
 
 def main() -> int:
@@ -49,16 +54,26 @@ def main() -> int:
         print(f"FAIL: parsed {len(rows)} channel rows, expected 16")
         return EXIT_FAIL
 
-    for idx_b, pin_b, raw_b, mv_b in rows:
-        idx, raw, mv = int(idx_b), int(raw_b), int(mv_b)
+    for pwr_b, idx_b, pin_b, raw_b, ma_b in rows:
+        idx, raw, ma = int(idx_b), int(raw_b), int(ma_b)
+        pwr = pwr_b.decode()
+        if pwr not in ("0", "1", "-"):
+            print(f"FAIL: bad pwr state {pwr!r} (ch{idx:02d})")
+            return EXIT_FAIL
         if not (0 <= idx <= 15):
             print(f"FAIL: bad index {idx}")
+            return EXIT_FAIL
+        if idx in RESERVED_PWR_IDX and pwr != "-":
+            print(f"FAIL: reserved PWR_EN channel reported {pwr!r} (ch{idx:02d})")
+            return EXIT_FAIL
+        if idx not in RESERVED_PWR_IDX and pwr == "-":
+            print(f"FAIL: GPIO-owned PWR_EN channel reported reserved (ch{idx:02d})")
             return EXIT_FAIL
         if not (0 <= raw <= 0xFFFF):
             print(f"FAIL: raw {raw} out of 16-bit range (ch{idx:02d})")
             return EXIT_FAIL
-        if mv > 3300:
-            print(f"FAIL: mv {mv} > VREF 3300 (ch{idx:02d})")
+        if ma > MAX_CURRENT_MA:
+            print(f"FAIL: mA {ma} > range {MAX_CURRENT_MA} (ch{idx:02d})")
             return EXIT_FAIL
 
     print("PASS: 16/16 channels reported within bounds")
