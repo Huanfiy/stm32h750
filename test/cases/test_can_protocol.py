@@ -53,6 +53,14 @@ def _has_ack(frames, ref_low: int, channel: int | None = None) -> bool:
     return False
 
 
+def _has_nack(frames, ref_low: int, channel: int | None = None) -> bool:
+    for msg in _decoded(frames):
+        if isinstance(msg, protocol.Ack) and msg.ref_id_low == ref_low and not msg.ok:
+            if channel is None or msg.channel_no == channel:
+                return True
+    return False
+
+
 def _reports(frames, channel: int | None = None) -> list[protocol.Report]:
     out = []
     for msg in _decoded(frames):
@@ -172,6 +180,23 @@ def _forced_low_event(zq: zqwl_can.ZqwlCan) -> tuple[bool, list[str]]:
     return not missing, missing
 
 
+def _disabled_channels_rejected(zq: zqwl_can.ZqwlCan) -> tuple[bool, list[str]]:
+    rx = []
+    rx.extend(_send_wait_ack(zq, protocol.encode_bind_header(7, "SN0007", batch_no=4), 0x10))
+    rx.extend(_send_wait_ack(zq, protocol.encode_control(protocol.CMD_START, batch_no=4, channel_mask=0x0040), 0x20))
+    rx.extend(_wait_frames(zq, 1.0))
+    _print_frames("disabled-channels", rx)
+
+    missing = []
+    if not _has_nack(rx, 0x10, channel=7):
+        missing.append("bind NACK channel=7")
+    if not _has_nack(rx, 0x20):
+        missing.append("start NACK when mask only contains disabled channel")
+    if _reports(rx, 7):
+        missing.append("disabled channel 7 unexpectedly reported")
+    return not missing, missing
+
+
 def main() -> int:
     if not jlink.have_jlink():
         print("SKIP: JLinkExe not in PATH")
@@ -186,6 +211,7 @@ def main() -> int:
             ("normal multi-channel", _normal_multichannel),
             ("stop/reset", _stop_reset),
             ("forced low-current event", _forced_low_event),
+            ("disabled channel rejection", _disabled_channels_rejected),
         ):
             jlink.reset_run()
             time.sleep(0.8)
