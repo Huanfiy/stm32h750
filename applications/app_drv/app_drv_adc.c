@@ -230,9 +230,11 @@ int app_drv_adc_wait(rt_int32_t timeout_ms)
 
 void app_drv_adc_get_snapshot(uint16_t out[APP_DRV_ADC_TOTAL_CH])
 {
-    rt_enter_critical();
+    /* The writer is the ADC DMA-complete ISR — scheduler locks don't stop
+     * it, so mask interrupts for the 32-byte copy. */
+    rt_base_t level = rt_hw_interrupt_disable();
     memcpy(out, adc_snapshot, sizeof(adc_snapshot));
-    rt_exit_critical();
+    rt_hw_interrupt_enable(level);
 }
 
 uint32_t app_drv_adc_raw_to_mv(uint16_t raw)
