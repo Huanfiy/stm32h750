@@ -4,13 +4,12 @@
 #include <rtthread.h>
 
 /*
- * Channel polarity. The PWR_ENx lines are assumed active-high: drive the pin
- * HIGH to turn that channel's power on. If the fixture wires them active-low,
- * flip this one pair — enable()/disable() and the power-off-at-boot default
- * both follow from it.
+ * Channel polarity. PWR_ENx lines are active-low: drive the pin LOW to turn
+ * that channel's power on. Power-off-at-boot therefore latches HIGH before
+ * switching the pin to output mode.
  */
-#define PWR_EN_ACTIVE_LEVEL     PIN_HIGH
-#define PWR_EN_INACTIVE_LEVEL   PIN_LOW
+#define PWR_EN_ACTIVE_LEVEL     PIN_LOW
+#define PWR_EN_INACTIVE_LEVEL   PIN_HIGH
 
 /* Channel table, indexed by (PWR_ENx number - 1). Order matches the enum. */
 static const app_drv_gpio_ch_t s_channels[APP_DRV_GPIO_CH_NUM] = {
@@ -111,9 +110,11 @@ static int app_drv_gpio_init(void)
         }
 
         /* Latch the inactive level into ODR before switching to output so the
-         * line never glitches active during the input→output transition. */
+         * line never glitches active during the input→output transition, then
+         * assert it again after mode setup to make boot state explicit. */
         rt_pin_write(pin, PWR_EN_INACTIVE_LEVEL);
         rt_pin_mode(pin, PIN_MODE_OUTPUT);
+        rt_pin_write(pin, PWR_EN_INACTIVE_LEVEL);
     }
     return RT_EOK;
 }

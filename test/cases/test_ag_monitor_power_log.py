@@ -3,7 +3,8 @@
 
 Uses real J-Link, serial msh, SD card, and ZQWL CAN. The case starts channel 1
 with an intentionally impossible current window, expects a LOW_CURRENT event,
-verifies PWR_EN1 is off in GPIOE_ODR, stops the batch, then reads the SD CSV log.
+verifies PWR_EN1 is high (inactive) in GPIOE_ODR, stops the batch, then reads
+the SD CSV log.
 """
 
 from __future__ import annotations
@@ -122,8 +123,8 @@ def main() -> int:
                     return EXIT_FAIL
 
                 odr = jlink.read32(GPIOE_ODR)
-                if ((odr >> PWR_EN1_BIT) & 1) != 0:
-                    print(f"FAIL: PWR_EN1 still high after fault, GPIOE_ODR=0x{odr:08X}")
+                if ((odr >> PWR_EN1_BIT) & 1) != 1:
+                    print(f"FAIL: PWR_EN1 not inactive-high after fault, GPIOE_ODR=0x{odr:08X}")
                     return EXIT_FAIL
 
                 _send_wait_ack(
@@ -156,7 +157,7 @@ def main() -> int:
         print("FAIL: SD log does not contain channel 1 LOW_CURRENT sample")
         return EXIT_FAIL
 
-    print("PASS: 100 Hz monitor logged to SD and LOW_CURRENT cut PWR_EN1")
+    print("PASS: 100 Hz monitor logged to SD and LOW_CURRENT drove PWR_EN1 inactive-high")
     return EXIT_PASS
 
 

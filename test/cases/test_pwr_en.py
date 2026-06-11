@@ -4,9 +4,11 @@
 Drives the `pwr_en` msh command over serial and verifies the *physical* GPIO
 output-data register via J-Link SWD — not just the firmware's own readback.
 
-For each channel under test we:
+For each GPIO-owned channel under test:
   - `pwr_en <n> 1`  → expect the pin's GPIOx_ODR bit set
   - `pwr_en <n> 0`  → expect the pin's GPIOx_ODR bit clear
+  - `pwr_en all en` → expect the pin's GPIOx_ODR bit clear (active-low enable)
+  - `pwr_en all dis` → expect the pin's GPIOx_ODR bit set
 
 Channel coverage spans the 14 GPIO-owned PWR_EN outputs. PWR_EN7/PD2 and
 PWR_EN15/PB2 are deliberately excluded because the board reserves those nets for
@@ -108,7 +110,7 @@ def main() -> int:
                     print(f"  {f}")
                 return EXIT_FAIL
             print(f"PASS: {len(CHANNELS)} channels read back {tag} in GPIO ODR")
-        for command, level in (("pwr_en all en", 1), ("pwr_en all dis", 0)):
+        for command, level in (("pwr_en all en", 0), ("pwr_en all dis", 1)):
             ok, fails = _check_all_command(command, level)
             if not ok:
                 print(f"FAIL: {command} mismatch:")
@@ -123,7 +125,7 @@ def main() -> int:
         print(f"SKIP: serial open failed: {exc}")
         return EXIT_SKIP
 
-    # Leave the fixture in a safe state: all channels off.
+    # Leave the fixture in a safe state: all channels off (active-low PWR_EN high).
     try:
         with serial_term.Term() as term:
             term.send_line("pwr_en all dis")

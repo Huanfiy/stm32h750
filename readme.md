@@ -83,6 +83,7 @@
 - 业务通道映射以本节上方 16 路表为准；ADC3 硬件扫描顺序保持 `PC3/ADC3_INP1` 后 `PC2/ADC3_INP0`，业务层将 `CH16` 绑定到 `snapshot[14]`。
 - 调试命令：`adc_dump` —— 按业务通道打印 `chn / pwr_en / en_pin / adc_ch / adc_pin / raw / ma`；`pwr_en=-` 表示该通道无 GPIO-owned PWR_EN。
 - 电源调试命令：`pwr_en all 0|1` 按原始电平批量拉低/拉高，`pwr_en all en|dis` 按 PWR_EN 逻辑批量使能/关闭。
+- PWR_EN 为低有效：`enable` 输出低电平，`disable` 和上电默认状态输出高电平。
 
 ### 4.2 CAN 上行
 
