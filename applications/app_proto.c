@@ -129,6 +129,15 @@ static const app_drv_gpio_ch_t s_power_channels[CHANNEL_COUNT] = {
     PWR_EN13, PWR_EN14, PWR_EN15, PWR_EN16,
 };
 
+/* Business channel -> app_drv_adc snapshot index. ADC3 samples PC3 then PC2,
+ * while fixture wiring maps PWR_EN16 to PC3 and reserved PWR_EN15 to PC2. */
+static const rt_uint8_t s_adc_snapshot_index[CHANNEL_COUNT] = {
+    0U,  1U,  2U,  3U,
+    4U,  5U,  6U,  7U,
+    8U,  9U,  10U, 11U,
+    12U, 13U, 15U, 14U,
+};
+
 static rt_bool_t channel_is_enabled(rt_uint8_t ch)
 {
     if (ch < 1U || ch > CHANNEL_COUNT) {
@@ -394,7 +403,7 @@ static void monitor_sample(void)
         if ((s_channel_mask & (1U << (ch - 1U))) == 0U) {
             continue;
         }
-        raw[ch - 1U] = adc[ch - 1U];
+        raw[ch - 1U] = adc[s_adc_snapshot_index[ch - 1U]];
         current[ch - 1U] = (rt_uint16_t)app_drv_adc_raw_to_current_ma(raw[ch - 1U]);
         state[ch - 1U] = 1U;
 

@@ -13,12 +13,20 @@ test/
 ├── cases/                    # 独立可执行测试用例（标准退码：0=PASS, 1=FAIL, 77=SKIP）
 │   ├── test_swd.py           # J-Link halt + PC 落在 QSPI XIP 区
 │   ├── test_boot.py          # 重启后串口看到 RT-Thread banner + msh 提示符
+│   ├── test_sd.py            # SDMMC 枚举、容量识别、无 hard fault
+│   ├── test_fs.py            # FATFS 自动挂载 + 写入/复位/读回
 │   ├── test_adc.py           # msh `adc_dump` 输出 16 路、值在量程内
 │   ├── test_can.py           # ZQWL ↔ MCU 双向收发，ID + 数据完全一致
 │   ├── test_can_protocol.py  # 业务 CAN 协议配置/绑定/开始 ACK + 周期上报
-│   └── test_can_diagnostics.py # CAN 物理层失败时读取 FDCAN2 错误寄存器
-└── run_all.py                # 按顺序跑全部 case，输出汇总表
+│   ├── test_ag_monitor_power_log.py # 低电流事件、断电、100 Hz SD 日志
+│   ├── test_pwr_en.py        # 14 路 GPIO-owned PWR_EN 物理 ODR 校验
+│   ├── test_msh_history.py   # MSH 上键历史召回
+│   ├── test_can_diagnostics.py # 手动诊断：读取 FDCAN2 错误寄存器
+│   └── test_can_user.py      # 手动工具：交互式发送 CAN 帧
+└── run_all.py                # 按顺序跑默认验收 case，输出汇总表
 ```
+
+`run_all.py` 默认执行 `CASE_ORDER` 中的 10 个闭环验收用例，不执行手动诊断/交互工具。
 
 ## 硬件接线前置
 

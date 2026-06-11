@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run every closed-loop case under `test/cases/` and print a summary table.
+"""Run the default closed-loop acceptance cases and print a summary table.
 
 Exit code = number of FAIL cases (0 on full success). SKIP does not fail.
 Each case runs as a subprocess so its sys.exit / stdout are isolated.
@@ -15,7 +15,8 @@ from pathlib import Path
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 
 # Order matters: swd resets first (proves bootloader+app jump), boot then
-# verifies the msh banner before any case sends an msh command.
+# verifies the msh banner before any case sends an msh command. Manual tools
+# such as test_can_diagnostics.py and test_can_user.py are intentionally omitted.
 CASE_ORDER = [
     "test_swd.py",
     "test_boot.py",

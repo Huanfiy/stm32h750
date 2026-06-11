@@ -270,7 +270,7 @@ static int cmd_adc_dump(int argc, char **argv)
         PWR_EN1,  PWR_EN2,  PWR_EN3,  PWR_EN4,
         PWR_EN5,  PWR_EN6,  PWR_EN7,  PWR_EN8,
         PWR_EN9,  PWR_EN10, PWR_EN11, PWR_EN12,
-        PWR_EN13, PWR_EN14, PWR_EN15, PWR_EN16,
+        PWR_EN13, PWR_EN14, PWR_EN16, PWR_EN15,
     };
     if (app_drv_adc_wait(1000) != RT_EOK) {
         rt_kprintf("adc: timeout waiting for snapshot\n");

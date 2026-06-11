@@ -25,7 +25,7 @@ from lib import serial_term  # noqa: E402
 EXIT_PASS, EXIT_FAIL, EXIT_SKIP = 0, 1, 77
 
 MAX_CURRENT_MA = 1320
-RESERVED_PWR_IDX = {6, 14}
+RESERVED_PWR_IDX = {6, 15}
 
 LINE_RE = re.compile(rb"pwr=([01-])\s+ch(\d{2})\s+(P[A-Z]\d):\s+raw=\s*(\d+)\s+mA=\s*(\d+)")
 VREF_RE = re.compile(rb"vrefint:\s+raw=\s*(\d+)\s+mV=\s*(\d+)")

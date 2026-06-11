@@ -44,7 +44,26 @@
 
 ## 4. 对外接口与通道约定
 
-物理通道编号保持 `1..16`，其中 `PWR_EN7/PD2` 被 SDMMC1_CMD 占用，`PWR_EN15/PE2` 被 QSPI/XIP 数据线占用。业务协议只启动和上报 14 路可控供电通道：`1..6`、`8..14`、`16`。
+物理通道编号保持 `1..16`，其中 `PWR_EN7/PD2` 被 SDMMC1_CMD 占用，`PWR_EN15/PB2` 被 QSPI/XIP 时钟线占用。业务协议只启动和上报 14 路可控供电通道：`1..6`、`8..14`、`16`。
+
+| 业务通道 | PWR_EN 引脚 | ADC 快照 | ADC 引脚/通道 | 协议状态 |
+| --- | --- | --- | --- | --- |
+| CH1 | PE1 | `snapshot[0]` | PA6 / ADC1_INP3 | 可控、上报 |
+| CH2 | PB9 | `snapshot[1]` | PC4 / ADC1_INP4 | 可控、上报 |
+| CH3 | PB7 | `snapshot[2]` | PB1 / ADC1_INP5 | 可控、上报 |
+| CH4 | PB5 | `snapshot[3]` | PA7 / ADC1_INP7 | 可控、上报 |
+| CH5 | PB3 | `snapshot[4]` | PC5 / ADC1_INP8 | 可控、上报 |
+| CH6 | PD6 | `snapshot[5]` | PB0 / ADC1_INP9 | 可控、上报 |
+| CH7 | PD2 | `snapshot[6]` | PC0 / ADC1_INP10 | 保留，不控制/上报 |
+| CH8 | PD4 | `snapshot[7]` | PC1 / ADC1_INP11 | 可控、上报 |
+| CH9 | PE7 | `snapshot[8]` | PA2 / ADC1_INP14 | 可控、上报 |
+| CH10 | PE9 | `snapshot[9]` | PA3 / ADC1_INP15 | 可控、上报 |
+| CH11 | PE13 | `snapshot[10]` | PA0 / ADC1_INP16 | 可控、上报 |
+| CH12 | PE11 | `snapshot[11]` | PA1 / ADC1_INP17 | 可控、上报 |
+| CH13 | PE12 | `snapshot[12]` | PA4 / ADC1_INP18 | 可控、上报 |
+| CH14 | PE10 | `snapshot[13]` | PA5 / ADC1_INP19 | 可控、上报 |
+| CH15 | PB2 | `snapshot[15]` | PC2 / ADC3_INP0 | 保留，不控制/上报 |
+| CH16 | PE8 | `snapshot[14]` | PC3 / ADC3_INP1 | 可控、上报 |
 
 ### 4.1 电流采集（16 路 ADC）
 
@@ -61,7 +80,9 @@
   - `app_drv_adc_get_snapshot(out[16])` —— 取 16 路原始码值快照；
   - `app_drv_adc_raw_to_mv(raw)` —— 原始码值换算为 mV（基准 3300 mV，满量程 65535）。
   - `app_drv_adc_raw_to_current_ma(raw)` —— 按 INA240A2（50 V/V）+ 50 mΩ 分流电阻换算为 mA。
+- 业务通道映射以本节上方 16 路表为准；ADC3 硬件扫描顺序保持 `PC3/ADC3_INP1` 后 `PC2/ADC3_INP0`，业务层将 `CH16` 绑定到 `snapshot[14]`。
 - 调试命令：`adc_dump` —— 打印 16 路 PWR_EN 状态、ADC 原始值与 mA；`pwr=-` 表示该通道无 GPIO-owned PWR_EN。
+- 电源调试命令：`pwr_en all 0|1` 按原始电平批量拉低/拉高，`pwr_en all en|dis` 按 PWR_EN 逻辑批量使能/关闭。
 
 ### 4.2 CAN 上行
 

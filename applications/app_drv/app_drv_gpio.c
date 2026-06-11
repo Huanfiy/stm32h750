@@ -26,7 +26,7 @@ static const app_drv_gpio_ch_t s_channels[APP_DRV_GPIO_CH_NUM] = {
  * this module leaves them untouched and ignores write ops for them:
  *
  *   PWR_EN7  / PD2 = SDMMC1_CMD.
- *   PWR_EN15 / PE2 = QUADSPI_BK1_IO2 / XIP data line.
+ *   PWR_EN15 / PB2 = QUADSPI_CLK / XIP clock line.
  *
  * PWM now uses TIM1_CH4 on PE14, so PWR_EN10/PE9 is a normal GPIO output.
  */
@@ -35,7 +35,7 @@ static rt_bool_t ch_is_reserved(app_drv_gpio_ch_t ch)
     switch (ch) {
     case PWR_EN7:               /* PD2 = SDMMC1_CMD */
         return RT_TRUE;
-    case PWR_EN15:              /* PE2 = QUADSPI_BK1_IO2 / XIP data line */
+    case PWR_EN15:              /* PB2 = QUADSPI_CLK / XIP clock line */
         return RT_TRUE;
     default:
         return RT_FALSE;
@@ -156,7 +156,8 @@ static void pwr_en_print_all(void)
  * pwr_en                  - dump all 16 channel levels
  * pwr_en <1..16>          - read one channel
  * pwr_en <1..16> <0|1>    - drive one channel LOW/HIGH (raw level)
- * pwr_en all <0|1>        - drive every channel LOW/HIGH
+ * pwr_en all <0|1>        - drive every GPIO-owned channel LOW/HIGH
+ * pwr_en all <en|dis>     - enable/disable every GPIO-owned channel
  */
 static int cmd_pwr_en(int argc, char **argv)
 {
@@ -166,22 +167,49 @@ static int cmd_pwr_en(int argc, char **argv)
     }
 
     if (rt_strcmp(argv[1], "all") == 0) {
-        int v, i;
+        int i;
         if (argc != 3) {
-            rt_kprintf("usage: pwr_en all <0|1>\n");
+            rt_kprintf("usage: pwr_en all <0|1|en|dis>\n");
             return -1;
         }
-        v = atoi(argv[2]) ? 1 : 0;
-        for (i = 0; i < APP_DRV_GPIO_CH_NUM; i++) {
-            v ? app_drv_gpio.high(s_channels[i]) : app_drv_gpio.low(s_channels[i]);
+
+        if (rt_strcmp(argv[2], "en") == 0) {
+            for (i = 0; i < APP_DRV_GPIO_CH_NUM; i++) {
+                app_drv_gpio.enable(s_channels[i]);
+            }
+            rt_kprintf("pwr_en: all -> en\n");
+            return 0;
         }
-        rt_kprintf("pwr_en: all -> %d\n", v);
-        return 0;
+        if (rt_strcmp(argv[2], "dis") == 0) {
+            for (i = 0; i < APP_DRV_GPIO_CH_NUM; i++) {
+                app_drv_gpio.disable(s_channels[i]);
+            }
+            rt_kprintf("pwr_en: all -> dis\n");
+            return 0;
+        }
+
+        if (rt_strcmp(argv[2], "1") == 0) {
+            for (i = 0; i < APP_DRV_GPIO_CH_NUM; i++) {
+                app_drv_gpio.high(s_channels[i]);
+            }
+            rt_kprintf("pwr_en: all -> 1\n");
+            return 0;
+        }
+        if (rt_strcmp(argv[2], "0") == 0) {
+            for (i = 0; i < APP_DRV_GPIO_CH_NUM; i++) {
+                app_drv_gpio.low(s_channels[i]);
+            }
+            rt_kprintf("pwr_en: all -> 0\n");
+            return 0;
+        }
+
+        rt_kprintf("usage: pwr_en all <0|1|en|dis>\n");
+        return -1;
     }
 
     int n = atoi(argv[1]);
     if (n < 1 || n > APP_DRV_GPIO_CH_NUM) {
-        rt_kprintf("usage: pwr_en [<1..16> [0|1]] | [all <0|1>]\n");
+        rt_kprintf("usage: pwr_en [<1..16> [0|1]] | [all <0|1|en|dis>]\n");
         return -1;
     }
 

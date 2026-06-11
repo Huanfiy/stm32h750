@@ -9,7 +9,7 @@ For each channel under test we:
   - `pwr_en <n> 0`  → expect the pin's GPIOx_ODR bit clear
 
 Channel coverage spans the 14 GPIO-owned PWR_EN outputs. PWR_EN7/PD2 and
-PWR_EN15/PE2 are deliberately excluded because the board reserves those nets for
+PWR_EN15/PB2 are deliberately excluded because the board reserves those nets for
 SDMMC_CMD and QSPI/XIP respectively.
 """
 
@@ -34,7 +34,7 @@ def _odr(port: str) -> int:
 
 # (PWR_EN channel number, port letter, pin bit). The 2 reserved channels are
 # excluded because app_drv_gpio intentionally refuses to drive them:
-#   PWR_EN7/PD2 = SDMMC1_CMD, PWR_EN15/PE2 = QUADSPI_BK1_IO2 / XIP.
+#   PWR_EN7/PD2 = SDMMC1_CMD, PWR_EN15/PB2 = QUADSPI_CLK / XIP.
 CHANNELS = [
     (1, "E", 1),    # PWR_EN1  PE1
     (2, "B", 9),    # PWR_EN2  PB9
@@ -75,6 +75,21 @@ def _check(level: int) -> tuple[bool, list[str]]:
     return (not fails), fails
 
 
+def _check_all_command(command: str, level: int) -> tuple[bool, list[str]]:
+    fails: list[str] = []
+    with serial_term.Term() as term:
+        term.read(0.2)
+        term.send_line(command)
+        term.read(0.3)
+        odr = jlink.read32_many(sorted({_odr(p) for _, p, _ in CHANNELS}))
+
+    for n, port, bit in CHANNELS:
+        actual = (odr[_odr(port)] >> bit) & 1
+        if actual != level:
+            fails.append(f"{command}: PWR_EN{n} (P{port}{bit}) ODR bit={actual}, want {level}")
+    return (not fails), fails
+
+
 def main() -> int:
     if not jlink.have_jlink():
         print("SKIP: JLinkExe not present")
@@ -93,6 +108,14 @@ def main() -> int:
                     print(f"  {f}")
                 return EXIT_FAIL
             print(f"PASS: {len(CHANNELS)} channels read back {tag} in GPIO ODR")
+        for command, level in (("pwr_en all en", 1), ("pwr_en all dis", 0)):
+            ok, fails = _check_all_command(command, level)
+            if not ok:
+                print(f"FAIL: {command} mismatch:")
+                for f in fails:
+                    print(f"  {f}")
+                return EXIT_FAIL
+            print(f"PASS: {command} drives {len(CHANNELS)} GPIO-owned channels")
     except jlink.JLinkUnavailable as exc:
         print(f"SKIP: J-Link could not access target: {exc}")
         return EXIT_SKIP
@@ -103,12 +126,12 @@ def main() -> int:
     # Leave the fixture in a safe state: all channels off.
     try:
         with serial_term.Term() as term:
-            term.send_line("pwr_en all 0")
+            term.send_line("pwr_en all dis")
             term.read(0.2)
     except OSError:
         pass
 
-    print(f"PASS: PWR_EN GPIO control verified on {len(CHANNELS)}/16 channels (PD2/EN7 and PE2/EN15 excluded)")
+    print(f"PASS: PWR_EN GPIO control verified on {len(CHANNELS)}/16 channels (PD2/EN7 and PB2/EN15 excluded)")
     return EXIT_PASS
 
 

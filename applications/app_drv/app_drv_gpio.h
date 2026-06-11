@@ -21,12 +21,12 @@ extern "C" {
  *
  * Pin map (per fixture wiring table; 14 GPIO-owned channels are enabled):
  *   EN1 PE1   EN2 PB9   EN3 PB7   EN4 PB5    EN5 PB3    EN6 PD6   EN7 PD2   EN8 PD4
- *   EN9 PE7   EN10 PE9  EN11 PE13 EN12 PE11  EN13 PE12  EN14 PE10 EN15 PE2  EN16 PE8
+ *   EN9 PE7   EN10 PE9  EN11 PE13 EN12 PE11  EN13 PE12  EN14 PE10 EN15 PB2  EN16 PE8
  *
  * RESERVED PINS — not owned by app_drv_gpio on this board (see the .ioc).
  * This module leaves them alone; calls are silently ignored and read() gives -1:
  *   PWR_EN7  / PD2 = SDMMC1_CMD.
- *   PWR_EN15 / PE2 = QUADSPI_BK1_IO2 / XIP data line.
+ *   PWR_EN15 / PB2 = QUADSPI_CLK / XIP clock line.
  * The other 14 channels are fixed GPIO outputs. PWM moved to TIM1_CH4/PE14, so
  * PWR_EN10/PE9 is GPIO-owned.
  */
@@ -45,7 +45,7 @@ typedef enum {
     PWR_EN12 = GET_PIN(E, 11),
     PWR_EN13 = GET_PIN(E, 12),
     PWR_EN14 = GET_PIN(E, 10),
-    PWR_EN15 = GET_PIN(E, 2),
+    PWR_EN15 = GET_PIN(B, 2),
     PWR_EN16 = GET_PIN(E, 8),
 } app_drv_gpio_ch_t;
 
