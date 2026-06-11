@@ -262,15 +262,32 @@ uint32_t app_drv_adc_raw_to_current_ma(uint16_t raw)
 
 static int cmd_adc_dump(int argc, char **argv)
 {
-    static const char * const pin_names[APP_DRV_ADC_TOTAL_CH] = {
-        "PA6", "PC4", "PB1", "PA7", "PC5", "PB0", "PC0", "PC1",
-        "PA2", "PA3", "PA0", "PA1", "PA4", "PA5", "PC3", "PC2",
-    };
-    static const app_drv_gpio_ch_t pwr_channels[APP_DRV_ADC_TOTAL_CH] = {
-        PWR_EN1,  PWR_EN2,  PWR_EN3,  PWR_EN4,
-        PWR_EN5,  PWR_EN6,  PWR_EN7,  PWR_EN8,
-        PWR_EN9,  PWR_EN10, PWR_EN11, PWR_EN12,
-        PWR_EN13, PWR_EN14, PWR_EN16, PWR_EN15,
+    typedef struct {
+        uint8_t chn;
+        app_drv_gpio_ch_t pwr_ch;
+        const char *pwr_pin;
+        uint8_t adc_idx;
+        const char *adc_ch;
+        const char *adc_pin;
+    } adc_dump_row_t;
+
+    static const adc_dump_row_t rows[APP_DRV_ADC_TOTAL_CH] = {
+        {1U,  PWR_EN1,  "PE1",  0U,  "ADC1_INP3",  "PA6"},
+        {2U,  PWR_EN2,  "PB9",  1U,  "ADC1_INP4",  "PC4"},
+        {3U,  PWR_EN3,  "PB7",  2U,  "ADC1_INP5",  "PB1"},
+        {4U,  PWR_EN4,  "PB5",  3U,  "ADC1_INP7",  "PA7"},
+        {5U,  PWR_EN5,  "PB3",  4U,  "ADC1_INP8",  "PC5"},
+        {6U,  PWR_EN6,  "PD6",  5U,  "ADC1_INP9",  "PB0"},
+        {7U,  PWR_EN7,  "PD2",  6U,  "ADC1_INP10", "PC0"},
+        {8U,  PWR_EN8,  "PD4",  7U,  "ADC1_INP11", "PC1"},
+        {9U,  PWR_EN9,  "PE7",  8U,  "ADC1_INP14", "PA2"},
+        {10U, PWR_EN10, "PE9",  9U,  "ADC1_INP15", "PA3"},
+        {11U, PWR_EN11, "PE13", 10U, "ADC1_INP16", "PA0"},
+        {12U, PWR_EN12, "PE11", 11U, "ADC1_INP17", "PA1"},
+        {13U, PWR_EN13, "PE12", 12U, "ADC1_INP18", "PA4"},
+        {14U, PWR_EN14, "PE10", 13U, "ADC1_INP19", "PA5"},
+        {15U, PWR_EN15, "PB2",  15U, "ADC3_INP0",  "PC2"},
+        {16U, PWR_EN16, "PE8",  14U, "ADC3_INP1",  "PC3"},
     };
     if (app_drv_adc_wait(1000) != RT_EOK) {
         rt_kprintf("adc: timeout waiting for snapshot\n");
@@ -279,11 +296,17 @@ static int cmd_adc_dump(int argc, char **argv)
     uint16_t s[APP_DRV_ADC_TOTAL_CH];
     app_drv_adc_get_snapshot(s);
     for (uint32_t i = 0; i < APP_DRV_ADC_TOTAL_CH; i++) {
-        int pwr = app_drv_gpio.read(pwr_channels[i]);
+        const adc_dump_row_t *row = &rows[i];
+        int pwr = app_drv_gpio.read(row->pwr_ch);
         const char *pwr_state = (pwr < 0) ? "-" : (pwr ? "1" : "0");
+        uint16_t raw = s[row->adc_idx];
 
-        rt_kprintf("pwr=%s  ch%02u %s: raw=%5u  mA=%4u\n",
-                   pwr_state, i, pin_names[i], s[i], app_drv_adc_raw_to_current_ma(s[i]));
+        if (i == 0U) {
+            rt_kprintf("chn pwr_en en_pin adc_ch      adc_pin raw    ma\n");
+        }
+        rt_kprintf("%-3u %-6s %-6s %-11s %-7s %5u %5u\n",
+                   row->chn, pwr_state, row->pwr_pin, row->adc_ch, row->adc_pin,
+                   raw, app_drv_adc_raw_to_current_ma(raw));
     }
     uint16_t vref = app_drv_adc_get_vrefint_raw();
     rt_kprintf("vrefint: raw=%5u  mV=%4u\n", vref, app_drv_adc_raw_to_mv(vref));

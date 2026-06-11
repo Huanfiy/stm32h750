@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ADC 16-channel closed-loop test.
 
-Sends `adc_dump` on the msh console and expects 16 lines of the form
-`pwr=<0|1|-> chNN <PIN>: raw=#### mA=####`. Validates that:
+Sends `adc_dump` on the msh console and expects 16 table rows of the form
+`chn pwr_en en_pin adc_ch adc_pin raw ma`. Validates that:
 - the snapshot semaphore releases at all (driver init + DMA + TIM6 work);
 - all 16 channels report (ADC1's 14ch + ADC3's 2ch);
 - PWR_EN status is readable as 0/1, or '-' for reserved channels;
@@ -25,9 +25,13 @@ from lib import serial_term  # noqa: E402
 EXIT_PASS, EXIT_FAIL, EXIT_SKIP = 0, 1, 77
 
 MAX_CURRENT_MA = 1320
-RESERVED_PWR_IDX = {6, 15}
+RESERVED_PWR_CHN = {7, 15}
+EXPECTED_LAST_ADC_PIN = {15: "PC2", 16: "PC3"}
 
-LINE_RE = re.compile(rb"pwr=([01-])\s+ch(\d{2})\s+(P[A-Z]\d):\s+raw=\s*(\d+)\s+mA=\s*(\d+)")
+LINE_RE = re.compile(
+    rb"^\s*(\d{1,2})\s+([01-])\s+(P[A-Z]\d+)\s+(ADC[13]_INP\d+)\s+(P[A-Z]\d+)\s+(\d+)\s+(\d+)\s*$",
+    re.MULTILINE,
+)
 VREF_RE = re.compile(rb"vrefint:\s+raw=\s*(\d+)\s+mV=\s*(\d+)")
 VREFINT_MV_MIN, VREFINT_MV_MAX = 1140, 1290
 
@@ -69,26 +73,30 @@ def main() -> int:
         print(f"FAIL: parsed {len(rows)} channel rows, expected 16")
         return EXIT_FAIL
 
-    for pwr_b, idx_b, pin_b, raw_b, ma_b in rows:
-        idx, raw, ma = int(idx_b), int(raw_b), int(ma_b)
+    for chn_b, pwr_b, en_pin_b, adc_ch_b, adc_pin_b, raw_b, ma_b in rows:
+        chn, raw, ma = int(chn_b), int(raw_b), int(ma_b)
         pwr = pwr_b.decode()
+        adc_pin = adc_pin_b.decode()
         if pwr not in ("0", "1", "-"):
-            print(f"FAIL: bad pwr state {pwr!r} (ch{idx:02d})")
+            print(f"FAIL: bad pwr state {pwr!r} (chn{chn:02d})")
             return EXIT_FAIL
-        if not (0 <= idx <= 15):
-            print(f"FAIL: bad index {idx}")
+        if not (1 <= chn <= 16):
+            print(f"FAIL: bad channel {chn}")
             return EXIT_FAIL
-        if idx in RESERVED_PWR_IDX and pwr != "-":
-            print(f"FAIL: reserved PWR_EN channel reported {pwr!r} (ch{idx:02d})")
+        if chn in RESERVED_PWR_CHN and pwr != "-":
+            print(f"FAIL: reserved PWR_EN channel reported {pwr!r} (chn{chn:02d})")
             return EXIT_FAIL
-        if idx not in RESERVED_PWR_IDX and pwr == "-":
-            print(f"FAIL: GPIO-owned PWR_EN channel reported reserved (ch{idx:02d})")
+        if chn not in RESERVED_PWR_CHN and pwr == "-":
+            print(f"FAIL: GPIO-owned PWR_EN channel reported reserved (chn{chn:02d})")
+            return EXIT_FAIL
+        if chn in EXPECTED_LAST_ADC_PIN and adc_pin != EXPECTED_LAST_ADC_PIN[chn]:
+            print(f"FAIL: chn{chn:02d} adc_pin={adc_pin}, want {EXPECTED_LAST_ADC_PIN[chn]}")
             return EXIT_FAIL
         if not (0 <= raw <= 0xFFFF):
-            print(f"FAIL: raw {raw} out of 16-bit range (ch{idx:02d})")
+            print(f"FAIL: raw {raw} out of 16-bit range (chn{chn:02d})")
             return EXIT_FAIL
         if ma > MAX_CURRENT_MA:
-            print(f"FAIL: mA {ma} > range {MAX_CURRENT_MA} (ch{idx:02d})")
+            print(f"FAIL: mA {ma} > range {MAX_CURRENT_MA} (chn{chn:02d})")
             return EXIT_FAIL
 
     print(f"PASS: 16/16 channels reported within bounds, vrefint={vref_mv} mV")
