@@ -3,7 +3,7 @@
 ## 背景
 
 - 日期：2026-05-28
-- 命令：`./run.sh app-flash`（外部 QSPI 烧录通道）
+- 命令：`./run.sh flash-app`（外部 QSPI 烧录通道）
 - 目标芯片：`STM32H750VB`
 - 外部 Flash：`W25Q64JV`（8 MB / 64 Mbit，JEDEC `0xEF4017`）
 - QSPI 引脚（CubeMX 配置）：

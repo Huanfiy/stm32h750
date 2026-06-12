@@ -4,7 +4,7 @@ Date: 2026-05-29
 
 ## Context
 
-`./run.sh app-flash` programs the RT-Thread image to external W25Q64 at
+`./run.sh flash-app` programs the RT-Thread image to external W25Q64 at
 `0x90000000` through a custom J-Link Open Flashloader. After the stable QSPI
 loader optimization, a full app flash measured roughly:
 

@@ -122,7 +122,7 @@ RAM 同位置（J-Link `savebin 0x20000000 0x560`）：
 ## 验证
 
 ```bash
-./run.sh rebuild && ./run.sh app-flash && ./run.sh reset
+./run.sh rebuild && ./run.sh flash-app && ./run.sh reset
 ```
 
 串口端到端：

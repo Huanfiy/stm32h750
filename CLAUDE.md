@@ -122,9 +122,17 @@ other third-party deps.
 
 Reusable channel modules under `test/lib/`:
 
-- `jlink.py` — `JLinkExe -CommandFile` wrapper: `reset_run()`, `halt_and_regs()`, `read32_many(addrs)`.
-- `serial_term.py` — `Term.send_line()` (paced to ~25 char/s so finsh doesn't drop bytes), `Term.expect(regex, timeout)`.
-- `zqwl_can.py` — ZQWL vendor binary protocol: `ZqwlCan(path, bitrate_code).send(id, data)` / `recv(timeout)` / `raw_drain()`. `BITRATE_500K_CLASSIC = 0x25`.
+- `jlink.py` — `JLinkExe -CommandFile` wrapper: `reset_run()`, `halt_and_regs(pre_cmds=…)` (folds e.g. `["r", "g", "Sleep 1000"]` into the same connect), `read32_many(addrs)`.
+- `serial_term.py` — `Term.send_line()` (paced to ~25 char/s), `Term.send_raw()` (burst, safe ≤ 16 bytes = UART RX FIFO depth), `Term.expect(regex, timeout)`, `Term.flush_input()`.
+- `zqwl_can.py` — ZQWL vendor binary protocol: `ZqwlCan(path, bitrate_code).send(id, data)` / `recv(timeout)` / `raw_drain()` / `flush_input()` / `pending_raw()`. `BITRATE_500K_CLASSIC = 0x25`.
+
+Timing discipline: cases wait on **events** (an exact log line via `expect`, a
+predicate over decoded CAN frames via the cases' `_wait_until`) with timeouts
+as caps — never fixed sleeps sized to the worst case. Fixed windows are
+reserved for negative checks ("no reports after STOP"). See `test/README.md`
+for the conventions and the known ZQWL-box failure mode (1 packet/s USB
+throttle state; only a power cycle clears it —
+`.agent/fixed/2026-06-12-zqwl-canfd-usb-1pps-throttle-state.md`).
 
 Per-feature cases under `test/cases/` are standalone executables using the
 autotools-style exit code convention: **0 = PASS, 1 = FAIL, 77 = SKIP**. Each

@@ -7,9 +7,9 @@
 ```
 test/
 ├── lib/                      # 可复用模块（不直接执行）
-│   ├── jlink.py              # JLinkExe 包装：reset_run / halt_and_regs / read32_many
-│   ├── serial_term.py        # 串口包装：Term.read / send_line / expect
-│   └── zqwl_can.py           # ZQWL 协议封装：ZqwlCan.send / recv / raw_drain
+│   ├── jlink.py              # JLinkExe 包装：reset_run / halt_and_regs(pre_cmds) / read32_many
+│   ├── serial_term.py        # 串口包装：Term.read / send_line / send_raw / expect / flush_input
+│   └── zqwl_can.py           # ZQWL 协议封装：ZqwlCan.send / recv / raw_drain / flush_input / pending_raw
 ├── cases/                    # 独立可执行测试用例（标准退码：0=PASS, 1=FAIL, 77=SKIP）
 │   ├── test_swd.py           # J-Link halt + PC 落在 QSPI XIP 区
 │   ├── test_boot.py          # 重启后串口看到 RT-Thread banner + msh 提示符
@@ -73,9 +73,45 @@ if __name__ == "__main__":
 
 把 case 文件名加入 `run_all.py::CASE_ORDER` 即可纳入全量跑。
 
+## 等待纪律（写 case 必读）
+
+case 的等待一律**事件驱动、超时只是上限**，不要按最坏情况睡满固定时长：
+
+- 串口侧等**精确日志行**：`term.expect(rb"\[FS\].*mounted at", 5.0)`、`expect(rb"SD card capacity…")`，
+  而不是 `term.read(4.0)` 盲读。固件里有确切完成信号的，等那一行。
+- CAN 侧等**解码后的条件**：照抄 `test_can_protocol.py::_wait_until(zq, rx, cond, timeout)` ——
+  `recv()` 每到一帧就醒一次，条件成立即返回，超时只兜底。把"缺什么"写成
+  `_missing(rx) -> list[str]`，等待谓词和失败报文共用同一函数。
+- 清残留用 `flush_input()`（`tcflush` 即时清空），不要 `read(0.3)` / `raw_drain(0.8)` 定时排空。
+- **固定时长窗口只留给负向检查**（"STOP 后不得再有上报"、"禁用通道必须沉默"）——那是语义，
+  不是浪费；正向等待出现固定 sleep 都应视为待修。
+
 ## 与 MSH 命令的约定
 
-`serial_term.Term.send_line()` 默认按 25 字符/秒发送（`CHAR_DELAY_S = 0.04`），原因是 finsh shell 在 115200 全速喂入时单字符 ring 会丢字。新 case 复用此 API、不要直接 `os.write(fd, b"long_cmd\n")`。
+向 msh 发命令有两条路径：
+
+- `Term.send_line()` —— 按 25 字符/秒逐字符发送（`CHAR_DELAY_S = 0.04`），任何长度的命令都安全。
+- `Term.send_raw(line + b"\r\n")` 整行突发 + `expect` 提示符同步 —— **仅限含 CRLF ≤ 16 字节的短命令**
+  （H7 UART RX FIFO 深度，见 `.agent/fixed/2026-06-02-msh-arrow-history-uart-rx-byte-loss-no-hw-fifo.md`；
+  `test_msh_history.py` 的 30/30 即此路径的回归背书）。批量短命令（如 `test_pwr_en.py` 的 28 条）
+  用这条路径可把 12 秒级的逐字符耗时压到 1 秒内。
+
+新 case 复用这两个 API、不要直接 `os.write(fd, b"long_cmd\n")`。
+
+## 已知硬件故障模式：ZQWL 盒「1 包/秒」节流态
+
+ZQWL UCANFD-100C 偶发进入一种病态：**所有 USB 上行（配置响应、心跳、数据帧）排进 FIFO，
+严格每秒只放一个包**，同时通道重开时会把队列里的陈旧帧重放到总线上。症状：
+
+- `test_can` 的 tx 方向突然要 4~5 秒（健康时 <20 ms）；`test_can_protocol` 的 `[time]` 打印整体膨胀；
+- `can_sniff` 抓到 `0x1xx` 的陈旧业务帧（之前 case 的 START/STOP 等）；
+- 心跳自报状态正常（0x20 = CAN0 开、总线正常），盒子不自知。
+
+重下发配置、通道关开、厂商系统复位命令（0x44 data[1]=1）、`USBDEVFS_RESET`、sysfs 重枚举
+**均无效，唯一恢复手段是拔插 USB 断电重启**。完整定位过程见
+`.agent/fixed/2026-06-12-zqwl-canfd-usb-1pps-throttle-state.md`。
+套件对此有一定耐受（条件等待的超时上限会吸收延迟、`test_can.test_rx` 有陈旧帧重试），
+病态下通常仍全绿、只是变慢——所以**变慢本身就是该故障的信号**。
 
 ## 协议参考
 

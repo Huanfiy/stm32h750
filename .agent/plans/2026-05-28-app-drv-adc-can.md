@@ -1,5 +1,10 @@
 # app_drv_adc / app_drv_can 应用层驱动落地计划
 
+> **状态（2026-06-12 回注）**：已全部落地（`applications/app_drv/`），且实现此后有四处偏移：
+> 采样时间 1.5→810.5 cycles（`2af3e44`）、电源/ADC 通道映射修正（`6c57205`）、
+> `adc_dump` 通道输出调整（`e2f8b6e`）、PWR_EN 改低有效（`42c71d8`）。
+> **具体参数以代码为准**；本文保留的价值是设计依据（DMA 域约束、FDCAN 消息 RAM 分配、位时序推导）。
+
 ## Context
 
 RT-Thread 的 `rt_adc_device` 框架是轮询式的，每次只能读一路、不支持 DMA/扫描，满足不了 16 路同步采样的需求；同时 `libraries/HAL_Drivers/drivers/drv_can.c` 只覆盖 F1/F4/F7/L4 的 bxCAN，**没有任何 H7-FDCAN 分支**，盲目 `select RT_USING_CAN` 会直接编译失败。两路都得绕过 RT-Thread 设备层，改为应用层驱动。
@@ -316,7 +321,7 @@ MSH_CMD_EXPORT_ALIAS(cmd_can_sniff, can_sniff, sniff CAN frames);
 **编译期**：
 ```
 ./run.sh rebuild         # 主 app，期望 build/rt-thread.bin 生成成功
-./run.sh app-flash       # 烧到 QSPI
+./run.sh flash-app       # 烧到 QSPI
 ./run.sh reset           # 启动
 ```
 
