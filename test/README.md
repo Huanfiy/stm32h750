@@ -16,6 +16,8 @@ test/
 │   ├── test_sd.py            # SDMMC 枚举、容量识别、无 hard fault
 │   ├── test_fs.py            # FATFS 自动挂载 + 写入/复位/读回
 │   ├── test_adc.py           # msh `adc_dump` 输出 16 路、值在量程内
+│   ├── test_adc_stat.py      # `adc_stat`/`adc_trace` 循环采集统计：100 Hz 节拍、vrefint 噪声边界
+│   ├── test_adc_zero.py      # 上电零偏校准：boot 校准已执行、ma 列 == corrected(raw, zero) 精确复算
 │   ├── test_can.py           # ZQWL ↔ MCU 双向收发，ID + 数据完全一致
 │   ├── test_can_protocol.py  # 业务 CAN 协议配置/绑定/开始 ACK + 周期上报
 │   ├── test_ag_monitor_power_log.py # 低电流事件、断电、100 Hz SD 日志
@@ -23,10 +25,11 @@ test/
 │   ├── test_msh_history.py   # MSH 上键历史召回
 │   ├── test_can_diagnostics.py # 手动诊断：读取 FDCAN2 错误寄存器
 │   └── test_can_user.py      # 手动工具：交互式发送 CAN 帧
+├── adc_quality_probe.py      # 手动诊断：ADC 噪声采集 + 时/频域分析，判定配置问题 vs 板级问题
 └── run_all.py                # 按顺序跑默认验收 case，输出汇总表
 ```
 
-`run_all.py` 默认执行 `CASE_ORDER` 中的 10 个闭环验收用例，不执行手动诊断/交互工具。
+`run_all.py` 默认执行 `CASE_ORDER` 中的 12 个闭环验收用例，不执行手动诊断/交互工具。
 
 ## 硬件接线前置
 
@@ -43,7 +46,13 @@ python3 test/run_all.py             # 全部 case + 汇总
 python3 test/cases/test_adc.py      # 跑单个 case
 python3 test/cases/test_can_protocol.py  # 业务 CAN 协议闭环
 python3 test/cases/test_can_diagnostics.py  # CAN 无收发时看 Bus-Off / TEC / LEC
+python3 test/adc_quality_probe.py   # ADC 数据质量差时定位：配置问题 or 硬件问题
 ```
+
+`adc_quality_probe.py` 以片内 vrefint 与最安静外部通道为双对照组（共享同一份
+时钟/采样/触发/DMA 配置），自动区分 ADC 配置问题与板级输入问题；2026-06-12 的
+排查结论见 `.agent/tasks/task-01.md`（配置健康，噪声来自未接负载通道的 INA240
+输入悬空，上电零偏校准已落地）。
 
 ## 写新 case 的模板
 
