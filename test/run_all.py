@@ -23,6 +23,7 @@ CASE_ORDER = [
     "test_sd.py",
     "test_fs.py",
     "test_adc.py",
+    "test_adc_stat.py",
     "test_can.py",
     "test_can_protocol.py",
     "test_ag_monitor_power_log.py",

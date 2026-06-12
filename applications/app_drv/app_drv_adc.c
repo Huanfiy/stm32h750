@@ -3,6 +3,7 @@
 
 #include <board.h>
 #include <rtdevice.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ADC1_CH_COUNT       14U
@@ -260,35 +261,37 @@ uint32_t app_drv_adc_raw_to_current_ma(uint16_t raw)
 #ifdef RT_USING_FINSH
 #include <finsh.h>
 
+typedef struct {
+    uint8_t chn;
+    app_drv_gpio_ch_t pwr_ch;
+    const char *pwr_pin;
+    uint8_t adc_idx;
+    const char *adc_ch;
+    const char *adc_pin;
+} adc_dump_row_t;
+
+static const adc_dump_row_t adc_rows[APP_DRV_ADC_TOTAL_CH] = {
+    {1U,  PWR_EN1,  "PE1",  0U,  "ADC1_INP3",  "PA6"},
+    {2U,  PWR_EN2,  "PB9",  1U,  "ADC1_INP4",  "PC4"},
+    {3U,  PWR_EN3,  "PB7",  2U,  "ADC1_INP5",  "PB1"},
+    {4U,  PWR_EN4,  "PB5",  3U,  "ADC1_INP7",  "PA7"},
+    {5U,  PWR_EN5,  "PB3",  4U,  "ADC1_INP8",  "PC5"},
+    {6U,  PWR_EN6,  "PD6",  5U,  "ADC1_INP9",  "PB0"},
+    {7U,  PWR_EN7,  "PD2",  6U,  "ADC1_INP10", "PC0"},
+    {8U,  PWR_EN8,  "PD4",  7U,  "ADC1_INP11", "PC1"},
+    {9U,  PWR_EN9,  "PE7",  8U,  "ADC1_INP14", "PA2"},
+    {10U, PWR_EN10, "PE9",  9U,  "ADC1_INP15", "PA3"},
+    {11U, PWR_EN11, "PE13", 10U, "ADC1_INP16", "PA0"},
+    {12U, PWR_EN12, "PE11", 11U, "ADC1_INP17", "PA1"},
+    {13U, PWR_EN13, "PE12", 12U, "ADC1_INP18", "PA4"},
+    {14U, PWR_EN14, "PE10", 13U, "ADC1_INP19", "PA5"},
+    {15U, PWR_EN15, "PB2",  15U, "ADC3_INP0",  "PC2"},
+    {16U, PWR_EN16, "PE8",  14U, "ADC3_INP1",  "PC3"},
+};
+
 static int cmd_adc_dump(int argc, char **argv)
 {
-    typedef struct {
-        uint8_t chn;
-        app_drv_gpio_ch_t pwr_ch;
-        const char *pwr_pin;
-        uint8_t adc_idx;
-        const char *adc_ch;
-        const char *adc_pin;
-    } adc_dump_row_t;
-
-    static const adc_dump_row_t rows[APP_DRV_ADC_TOTAL_CH] = {
-        {1U,  PWR_EN1,  "PE1",  0U,  "ADC1_INP3",  "PA6"},
-        {2U,  PWR_EN2,  "PB9",  1U,  "ADC1_INP4",  "PC4"},
-        {3U,  PWR_EN3,  "PB7",  2U,  "ADC1_INP5",  "PB1"},
-        {4U,  PWR_EN4,  "PB5",  3U,  "ADC1_INP7",  "PA7"},
-        {5U,  PWR_EN5,  "PB3",  4U,  "ADC1_INP8",  "PC5"},
-        {6U,  PWR_EN6,  "PD6",  5U,  "ADC1_INP9",  "PB0"},
-        {7U,  PWR_EN7,  "PD2",  6U,  "ADC1_INP10", "PC0"},
-        {8U,  PWR_EN8,  "PD4",  7U,  "ADC1_INP11", "PC1"},
-        {9U,  PWR_EN9,  "PE7",  8U,  "ADC1_INP14", "PA2"},
-        {10U, PWR_EN10, "PE9",  9U,  "ADC1_INP15", "PA3"},
-        {11U, PWR_EN11, "PE13", 10U, "ADC1_INP16", "PA0"},
-        {12U, PWR_EN12, "PE11", 11U, "ADC1_INP17", "PA1"},
-        {13U, PWR_EN13, "PE12", 12U, "ADC1_INP18", "PA4"},
-        {14U, PWR_EN14, "PE10", 13U, "ADC1_INP19", "PA5"},
-        {15U, PWR_EN15, "PB2",  15U, "ADC3_INP0",  "PC2"},
-        {16U, PWR_EN16, "PE8",  14U, "ADC3_INP1",  "PC3"},
-    };
+    const adc_dump_row_t *rows = adc_rows;
     if (app_drv_adc_wait(1000) != RT_EOK) {
         rt_kprintf("adc: timeout waiting for snapshot\n");
         return -1;
@@ -314,4 +317,176 @@ static int cmd_adc_dump(int argc, char **argv)
     return 0;
 }
 MSH_CMD_EXPORT_ALIAS(cmd_adc_dump, adc_dump, dump latest 16-ch ADC snapshot);
+
+/* Slot layout for the stats/trace commands: 0..15 = snapshot indices
+ * (adc_rows[].adc_idx), 16 = VREFINT. VREFINT never leaves the die, so its
+ * noise floor isolates "ADC config/core problem" from "board/input problem". */
+#define ADC_STAT_SLOTS      (APP_DRV_ADC_TOTAL_CH + 1U)
+#define ADC_STAT_VREF_SLOT  APP_DRV_ADC_TOTAL_CH
+#define ADC_STAT_MAX_FRAMES 10000U  /* keeps sum^2 and sumsq*N inside u64 */
+
+static uint32_t isqrt64(uint64_t v)
+{
+    uint64_t res = 0U;
+    uint64_t bit = 1ULL << 62;
+
+    while (bit > v) bit >>= 2;
+    while (bit != 0U) {
+        if (v >= res + bit) {
+            v -= res + bit;
+            res = (res >> 1) + bit;
+        } else {
+            res >>= 1;
+        }
+        bit >>= 2;
+    }
+    return (uint32_t)res;
+}
+
+static void adc_frame_read(uint16_t vals[ADC_STAT_SLOTS])
+{
+    app_drv_adc_get_snapshot(vals);
+    vals[ADC_STAT_VREF_SLOT] = app_drv_adc_get_vrefint_raw();
+}
+
+static int cmd_adc_stat(int argc, char **argv)
+{
+    static uint16_t s_min[ADC_STAT_SLOTS];
+    static uint16_t s_max[ADC_STAT_SLOTS];
+    static uint64_t s_sum[ADC_STAT_SLOTS];
+    static uint64_t s_sumsq[ADC_STAT_SLOTS];
+    uint32_t frames = 500U;
+
+    if (argc > 1) {
+        frames = (uint32_t)atoi(argv[1]);
+        if (frames < 10U || frames > ADC_STAT_MAX_FRAMES) {
+            rt_kprintf("usage: adc_stat [frames]  (10..%u, default 500; 100Hz frames)\n",
+                       ADC_STAT_MAX_FRAMES);
+            return -1;
+        }
+    }
+
+    for (uint32_t i = 0; i < ADC_STAT_SLOTS; i++) {
+        s_min[i] = 0xFFFFU;
+        s_max[i] = 0U;
+        s_sum[i] = 0U;
+        s_sumsq[i] = 0U;
+    }
+
+    /* The ISR releases the sem at 100Hz with no consumer between commands, so
+     * the count has piled up — reset it so every take below is a fresh frame. */
+    rt_sem_control(&adc_sem, RT_IPC_CMD_RESET, (void *)0);
+    rt_tick_t t0 = rt_tick_get();
+    for (uint32_t f = 0; f < frames; f++) {
+        uint16_t vals[ADC_STAT_SLOTS];
+
+        if (app_drv_adc_wait(100) != RT_EOK) {
+            rt_kprintf("adc_stat: timeout at frame %u\n", f);
+            return -1;
+        }
+        adc_frame_read(vals);
+        for (uint32_t i = 0; i < ADC_STAT_SLOTS; i++) {
+            uint16_t v = vals[i];
+            if (v < s_min[i]) s_min[i] = v;
+            if (v > s_max[i]) s_max[i] = v;
+            s_sum[i] += v;
+            s_sumsq[i] += (uint64_t)v * v;
+        }
+    }
+    uint32_t elapsed_ms = (uint32_t)((rt_tick_get() - t0) * 1000U / RT_TICK_PER_SECOND);
+
+    rt_kprintf("adc_stat: frames=%u elapsed=%u ms (nominal 10 ms/frame)\n", frames, elapsed_ms);
+    rt_kprintf("chn adc_ch      pin     pwr   mean    min    max   p2p    std     mV\n");
+    for (uint32_t i = 0; i <= APP_DRV_ADC_TOTAL_CH; i++) {
+        uint32_t slot, mean, std10, mv;
+        uint64_t var100;
+        const char *name, *pin, *pwr = "-";
+
+        if (i < APP_DRV_ADC_TOTAL_CH) {
+            const adc_dump_row_t *row = &adc_rows[i];
+            int p = app_drv_gpio.read(row->pwr_ch);
+            slot = row->adc_idx;
+            name = row->adc_ch;
+            pin = row->adc_pin;
+            pwr = (p < 0) ? "-" : (p ? "1" : "0");
+        } else {
+            slot = ADC_STAT_VREF_SLOT;
+            name = "vrefint";
+            pin = "-";
+        }
+        mean = (uint32_t)(s_sum[slot] / frames);
+        /* var*100 = (N*sumsq - sum^2) * 100 / N^2; isqrt gives std*10. */
+        var100 = ((uint64_t)frames * s_sumsq[slot] - s_sum[slot] * s_sum[slot]) * 100U
+                 / ((uint64_t)frames * frames);
+        std10 = isqrt64(var100);
+        mv = app_drv_adc_raw_to_mv((uint16_t)mean);
+        rt_kprintf("%-3u %-11s %-7s %-3s %6u %6u %6u %5u %4u.%u %6u\n",
+                   i + 1U, name, pin, pwr, mean, s_min[slot], s_max[slot],
+                   (uint32_t)(s_max[slot] - s_min[slot]), std10 / 10U, std10 % 10U, mv);
+    }
+    return 0;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_adc_stat, adc_stat, per-channel min/max/mean/std over N 100Hz frames);
+
+static int cmd_adc_trace(int argc, char **argv)
+{
+    /* adc_trace <frames> <ch>...  — ch: 1..16 or 'v' (vrefint), up to 6 cols.
+     * One CSV row per 100Hz frame; ~50 chars/row stays well under the 10 ms
+     * frame budget at 115200 baud. */
+    uint32_t slots[6];
+    uint32_t ncols = (uint32_t)argc - 2U;
+    uint32_t frames;
+
+    if (argc < 3 || ncols > 6U) {
+        rt_kprintf("usage: adc_trace <frames 1..%u> <ch>...  (ch: 1..16 or v, max 6)\n",
+                   ADC_STAT_MAX_FRAMES);
+        return -1;
+    }
+    frames = (uint32_t)atoi(argv[1]);
+    if (frames < 1U || frames > ADC_STAT_MAX_FRAMES) {
+        rt_kprintf("adc_trace: bad frame count '%s'\n", argv[1]);
+        return -1;
+    }
+    for (uint32_t c = 0; c < ncols; c++) {
+        const char *a = argv[2 + c];
+        if (a[0] == 'v' && a[1] == '\0') {
+            slots[c] = ADC_STAT_VREF_SLOT;
+        } else {
+            int n = atoi(a);
+            if (n < 1 || n > (int)APP_DRV_ADC_TOTAL_CH) {
+                rt_kprintf("adc_trace: bad channel '%s'\n", a);
+                return -1;
+            }
+            slots[c] = adc_rows[n - 1].adc_idx;
+        }
+    }
+
+    rt_kprintf("frame");
+    for (uint32_t c = 0; c < ncols; c++) {
+        rt_kprintf(",%s%s", (slots[c] == ADC_STAT_VREF_SLOT) ? "vref" : "ch",
+                   (slots[c] == ADC_STAT_VREF_SLOT) ? "" : argv[2 + c]);
+    }
+    rt_kprintf("\n");
+
+    rt_sem_control(&adc_sem, RT_IPC_CMD_RESET, (void *)0);
+    for (uint32_t f = 0; f < frames; f++) {
+        char line[64];
+        int len;
+        uint16_t vals[ADC_STAT_SLOTS];
+
+        if (app_drv_adc_wait(100) != RT_EOK) {
+            rt_kprintf("adc_trace: timeout at frame %u\n", f);
+            return -1;
+        }
+        adc_frame_read(vals);
+        len = rt_snprintf(line, sizeof(line), "%u", f);
+        for (uint32_t c = 0; c < ncols; c++) {
+            len += rt_snprintf(line + len, sizeof(line) - (rt_size_t)len, ",%u", vals[slots[c]]);
+        }
+        rt_kprintf("%s\n", line);
+    }
+    rt_kprintf("adc_trace: done frames=%u\n", frames);
+    return 0;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_adc_trace, adc_trace, CSV time series of selected ADC channels);
 #endif
