@@ -9,7 +9,6 @@ silence, hangs in `rt_components_init()`, and finsh-thread startup failures.
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -34,7 +33,8 @@ def main() -> int:
                 print(f"SKIP: J-Link unreachable: {exc}")
                 return EXIT_SKIP
 
-            time.sleep(0.2)
+            # No settle needed: the serial fd is already open, so banner bytes
+            # buffer in the kernel while JLinkExe exits; expect() just waits.
             buf, ok = term.expect(rb"msh\s*/>", timeout=6.0)
     except OSError as exc:
         print(f"SKIP: serial open failed: {exc}")

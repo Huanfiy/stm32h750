@@ -11,7 +11,6 @@ Resets the target via J-Link, then halts and verifies:
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -29,10 +28,8 @@ def main() -> int:
         return EXIT_SKIP
 
     try:
-        jlink.reset_run()
-        time.sleep(1.0)  # let bootloader hand off + RT-Thread spin up
-
-        regs = jlink.halt_and_regs()
+        # One J-Link session: reset+run, settle in-probe, halt, snapshot, resume.
+        regs = jlink.halt_and_regs(pre_cmds=["r", "g", "Sleep 1000"])
     except jlink.JLinkUnavailable as exc:
         print(f"SKIP: J-Link unreachable: {exc}")
         return EXIT_SKIP

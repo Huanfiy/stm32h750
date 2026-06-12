@@ -24,11 +24,23 @@ EXIT_PASS, EXIT_FAIL, EXIT_SKIP = 0, 1, 77
 
 
 def _wait_frames(zq: zqwl_can.ZqwlCan, seconds: float):
+    """Fixed observation window — for negative checks (nothing may arrive)."""
     deadline = time.time() + seconds
     out = []
     while time.time() < deadline:
         out.extend(zq.recv(min(0.2, max(0.0, deadline - time.time()))))
     return out
+
+
+def _wait_until(zq: zqwl_can.ZqwlCan, rx: list, cond, timeout: float) -> bool:
+    """Extend `rx` until `cond(rx)` holds or `timeout` elapses.
+
+    recv() wakes per received frame, so this returns within ms of the
+    condition becoming true — the timeout is a cap, not a fixed wait."""
+    deadline = time.time() + timeout
+    while not cond(rx) and time.time() < deadline:
+        rx.extend(zq.recv(deadline - time.time()))
+    return cond(rx)
 
 
 def _print_frames(label: str, frames) -> None:
@@ -77,26 +89,21 @@ def _events(frames, channel: int | None = None) -> list[protocol.Event]:
     return out
 
 
-def _send_and_collect(zq: zqwl_can.ZqwlCan, frames, rx_after_each: float = 0.3):
-    rx = []
+def _send_all(zq: zqwl_can.ZqwlCan, frames, gap: float = 0.02) -> None:
+    """Send frames back-to-back. The MCU's IRQ-fed RX ring preserves order and
+    absorbs the burst, so responses are collected afterwards by _wait_until."""
     for can_id, payload in frames:
         print(f"tx id=0x{can_id:03X} data={payload.hex(' ').upper()}")
         zq.send(can_id, payload)
-        time.sleep(0.1)
-        rx.extend(zq.recv(rx_after_each))
-    return rx
+        time.sleep(gap)
 
 
 def _send_wait_ack(zq: zqwl_can.ZqwlCan, frame, ref_low: int, timeout: float = 6.0):
-    rx = []
+    rx: list = []
     can_id, payload = frame
     print(f"tx id=0x{can_id:03X} data={payload.hex(' ').upper()}")
     zq.send(can_id, payload)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        rx.extend(zq.recv(min(0.5, max(0.0, deadline - time.time()))))
-        if _has_ack(rx, ref_low):
-            break
+    _wait_until(zq, rx, lambda r: _has_ack(r, ref_low), timeout)
     return rx
 
 
@@ -117,22 +124,27 @@ def _normal_multichannel(zq: zqwl_can.ZqwlCan) -> tuple[bool, list[str]]:
         *_bind_frames(channels, batch_no=1),
         protocol.encode_control(protocol.CMD_START, batch_no=1, channel_mask=mask),
     ]
-    rx = _send_and_collect(zq, frames)
-    rx.extend(_wait_frames(zq, 8.0))
-    _print_frames("normal-multichannel", rx)
+    _send_all(zq, frames)
 
-    missing = []
-    if not _has_ack(rx, 0x00):
-        missing.append("config ACK ref=0x00")
-    for ch in channels:
-        if not _has_ack(rx, 0x10, channel=ch):
-            missing.append(f"bind ACK channel={ch}")
-        if not _reports(rx, ch):
-            missing.append(f"report channel={ch}")
-    if not _has_ack(rx, 0x20):
-        missing.append("start ACK ref=0x20")
-    if not any(r.mcu_state == 2 for r in _reports(rx)):
-        missing.append("completion report state=2")
+    def _missing(rx) -> list[str]:
+        out = []
+        if not _has_ack(rx, 0x00):
+            out.append("config ACK ref=0x00")
+        for ch in channels:
+            if not _has_ack(rx, 0x10, channel=ch):
+                out.append(f"bind ACK channel={ch}")
+            if not _reports(rx, ch):
+                out.append(f"report channel={ch}")
+        if not _has_ack(rx, 0x20):
+            out.append("start ACK ref=0x20")
+        if not any(r.mcu_state == 2 for r in _reports(rx)):
+            out.append("completion report state=2")
+        return out
+
+    rx: list = []
+    _wait_until(zq, rx, lambda r: not _missing(r), 10.0)
+    _print_frames("normal-multichannel", rx)
+    missing = _missing(rx)
     return not missing, missing
 
 
@@ -160,31 +172,37 @@ def _stop_reset(zq: zqwl_can.ZqwlCan) -> tuple[bool, list[str]]:
 
 
 def _forced_low_event(zq: zqwl_can.ZqwlCan) -> tuple[bool, list[str]]:
-    rx = _send_and_collect(
-        zq,
-        [
-            protocol.encode_config(report_period_100ms=5, duration_s=2, current_min_ma=5000, current_max_ma=6000),
-            protocol.encode_control(protocol.CMD_START, batch_no=3, channel_mask=0x0001),
-        ],
-    )
-    rx.extend(_wait_frames(zq, 3.0))
-    _print_frames("forced-low-event", rx)
+    _send_all(zq, [
+        protocol.encode_config(report_period_100ms=5, duration_s=2, current_min_ma=5000, current_max_ma=6000),
+        protocol.encode_control(protocol.CMD_START, batch_no=3, channel_mask=0x0001),
+    ])
 
-    missing = []
-    if not _events(rx, 1):
-        missing.append("0x210 event channel=1")
-    if not any(evt.event_type == 0x02 for evt in _events(rx, 1)):
-        missing.append("LOW_CURRENT event_type=0x02")
-    if not any(r.mcu_state == 3 and r.error_code == 0x02 for r in _reports(rx, 1)):
-        missing.append("report abnormal state/error LOW_CURRENT")
+    def _missing(rx) -> list[str]:
+        out = []
+        if not _events(rx, 1):
+            out.append("0x210 event channel=1")
+        if not any(evt.event_type == 0x02 for evt in _events(rx, 1)):
+            out.append("LOW_CURRENT event_type=0x02")
+        if not any(r.mcu_state == 3 and r.error_code == 0x02 for r in _reports(rx, 1)):
+            out.append("report abnormal state/error LOW_CURRENT")
+        return out
+
+    rx: list = []
+    _wait_until(zq, rx, lambda r: not _missing(r), 4.0)
+    _print_frames("forced-low-event", rx)
+    missing = _missing(rx)
     return not missing, missing
 
 
 def _disabled_channels_rejected(zq: zqwl_can.ZqwlCan) -> tuple[bool, list[str]]:
-    rx = []
-    rx.extend(_send_wait_ack(zq, protocol.encode_bind_header(7, "SN0007", batch_no=4), 0x10))
-    rx.extend(_send_wait_ack(zq, protocol.encode_control(protocol.CMD_START, batch_no=4, channel_mask=0x0040), 0x20))
-    rx.extend(_wait_frames(zq, 1.0))
+    # Expected responses here are NACKs, so wait on _has_nack — the old
+    # _send_wait_ack(ok-ACK) loops could never match and burned 2 × 6 s.
+    rx: list = []
+    _send_all(zq, [protocol.encode_bind_header(7, "SN0007", batch_no=4)])
+    _wait_until(zq, rx, lambda r: _has_nack(r, 0x10, channel=7), 3.0)
+    _send_all(zq, [protocol.encode_control(protocol.CMD_START, batch_no=4, channel_mask=0x0040)])
+    _wait_until(zq, rx, lambda r: _has_nack(r, 0x20), 3.0)
+    rx.extend(_wait_frames(zq, 1.0))   # negative window: channel 7 must stay silent
     _print_frames("disabled-channels", rx)
 
     missing = []
@@ -213,12 +231,14 @@ def main() -> int:
             ("forced low-current event", _forced_low_event),
             ("disabled channel rejection", _disabled_channels_rejected),
         ):
+            t0 = time.time()
             jlink.reset_run()
             time.sleep(0.8)
             with zqwl_can.ZqwlCan() as zq:
-                zq.raw_drain(2.0)
+                zq.flush_input()
                 ok, missing = fn(zq)
                 checks.append((name, ok, missing))
+            print(f"[time] {name}: {time.time() - t0:.2f}s")
     except jlink.JLinkUnavailable as exc:
         print(f"SKIP: J-Link unreachable: {exc}")
         return EXIT_SKIP

@@ -43,7 +43,7 @@ def main() -> int:
 
     try:
         with serial_term.Term() as term:
-            term.read(0.3)            # drain any stale bytes
+            term.flush_input()
             term.send_line("adc_dump")
             buf, ok = term.expect(rb"vrefint:.*\n", timeout=3.0)
     except OSError as exc:

@@ -55,20 +55,29 @@ CHANNELS = [
 ]
 
 
-def _read_bits(term: serial_term.Term) -> dict[str, int]:
-    addrs = sorted({_odr(p) for _, p, _ in CHANNELS})
-    return jlink.read32_many(addrs)
+def _burst_cmd(term: serial_term.Term, line: str, timeout: float = 1.5) -> None:
+    """Send a short command as one burst and sync on the next prompt.
+
+    Lines must stay ≤ 16 bytes incl. CRLF — within the H7 UART RX FIFO depth
+    that test_msh_history.py proves safe for back-to-back bytes. The prompt
+    sync both paces the loop and confirms the command finished executing, so
+    no settle delay is needed before halting the core."""
+    term.send_raw(line.encode() + b"\r\n")
+    term.expect(rb"msh\s*/>", timeout)
+
+
+def _snapshot_odr() -> dict[int, int]:
+    return jlink.read32_many(sorted({_odr(p) for _, p, _ in CHANNELS}))
 
 
 def _check(level: int) -> tuple[bool, list[str]]:
     """Drive every channel to `level`, then assert each ODR bit matches."""
     fails: list[str] = []
     with serial_term.Term() as term:
-        term.read(0.2)
+        term.flush_input()
         for n, _, _ in CHANNELS:
-            term.send_line(f"pwr_en {n} {level}")
-        term.read(0.3)  # let the last command settle before halting the core
-        odr = jlink.read32_many(sorted({_odr(p) for _, p, _ in CHANNELS}))
+            _burst_cmd(term, f"pwr_en {n} {level}")
+        odr = _snapshot_odr()
 
     for n, port, bit in CHANNELS:
         actual = (odr[_odr(port)] >> bit) & 1
@@ -80,10 +89,9 @@ def _check(level: int) -> tuple[bool, list[str]]:
 def _check_all_command(command: str, level: int) -> tuple[bool, list[str]]:
     fails: list[str] = []
     with serial_term.Term() as term:
-        term.read(0.2)
-        term.send_line(command)
-        term.read(0.3)
-        odr = jlink.read32_many(sorted({_odr(p) for _, p, _ in CHANNELS}))
+        term.flush_input()
+        _burst_cmd(term, command)
+        odr = _snapshot_odr()
 
     for n, port, bit in CHANNELS:
         actual = (odr[_odr(port)] >> bit) & 1
@@ -128,8 +136,7 @@ def main() -> int:
     # Leave the fixture in a safe state: all channels off (active-low PWR_EN high).
     try:
         with serial_term.Term() as term:
-            term.send_line("pwr_en all dis")
-            term.read(0.2)
+            _burst_cmd(term, "pwr_en all dis")
     except OSError:
         pass
 

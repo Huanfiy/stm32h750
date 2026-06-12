@@ -19,7 +19,6 @@ RXFNE ISR may fall up to 16 chars behind without overrun, so recall is 100%.
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -46,33 +45,34 @@ def main() -> int:
 
     try:
         with serial_term.Term() as term:
-            term.read(0.3)  # drain stale bytes
+            term.flush_input()
 
             if not _settle_prompt(term):
                 print("SKIP: no msh prompt — app not running on target")
                 return EXIT_SKIP
 
-            # Seed history with the marker command.
+            # Seed history with the marker command (its output ends in a prompt).
             term.send_raw(MARKER.encode() + b"\r")
-            term.read(0.5)
+            term.expect(rb"msh\s*/>", timeout=2.0)
 
             recalled = 0
             first_failures: list[bytes] = []
             for i in range(TRIALS):
-                # Fresh, empty prompt: commit whatever is on the line.
+                # Commit whatever is on the line (re-runs the recalled marker
+                # command); syncing on the prompt replaces the old blind reads.
                 term.send_raw(b"\r")
-                term.read(0.15)
+                term.expect(rb"msh\s*/>", timeout=2.0)
                 # One up-arrow, 3 bytes back-to-back like a real terminal.
                 term.send_raw(UP)
-                echo = term.read(0.30)
-                if MARKER.encode() in echo:
+                echo, ok = term.expect(MARKER.encode(), timeout=0.4)
+                if ok:
                     recalled += 1
                 elif len(first_failures) < 5:
                     first_failures.append(echo)
 
             # Leave the shell on a clean line.
             term.send_raw(b"\r")
-            term.read(0.2)
+            term.expect(rb"msh\s*/>", timeout=2.0)
     except OSError as exc:
         print(f"SKIP: serial open failed: {exc}")
         return EXIT_SKIP

@@ -81,9 +81,13 @@ def read32(addr: int) -> int:
 _REG_RE = re.compile(r"([A-Z][A-Z0-9_]*)\s*=\s*([0-9A-Fa-f]{8})")
 
 
-def halt_and_regs() -> dict[str, int]:
-    """Halt the core and return CPU register snapshot ({R0..R15, MSP, PSP, xPSR, ...} → value)."""
-    out = _run(["h", "regs", "g"])
+def halt_and_regs(pre_cmds: list[str] | None = None) -> dict[str, int]:
+    """Halt the core and return CPU register snapshot ({R0..R15, MSP, PSP, xPSR, ...} → value).
+
+    `pre_cmds` are J-Link Commander commands run in the same session before the
+    halt — e.g. `["r", "g", "Sleep 800"]` folds a reset+settle into one connect.
+    """
+    out = _run([*(pre_cmds or []), "h", "regs", "g"])
     regs: dict[str, int] = {}
     for m in _REG_RE.finditer(out):
         regs[m.group(1)] = int(m.group(2), 16)

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import re
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -45,9 +44,14 @@ def main() -> int:
                 print(f"SKIP: J-Link unreachable: {exc}")
                 return EXIT_SKIP
 
-            time.sleep(0.2)
             buf, msh_ok = term.expect(rb"msh\s*/>", timeout=6.0)
-            buf += term.read(5.0)
+            # mmcsd enumerates asynchronously: wait for the capacity line
+            # instead of a blind drain, then keep a short tail window so a
+            # BusFault during the first block read still lands in `buf`.
+            if msh_ok and not CAPACITY_RE.search(buf):
+                extra, _ = term.expect(rb"SD card capacity\s+\d+\s*KB", timeout=5.0)
+                buf += extra
+            buf += term.read(0.8)
 
             still_alive = False
             if msh_ok and b"hard fault" not in buf:

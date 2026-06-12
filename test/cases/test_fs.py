@@ -41,18 +41,25 @@ PROMPT = rb"msh\s*/>"
 PROBE_FILE = "/fsprobe.txt"
 
 
+MOUNTED_RE = re.compile(rb"\[FS\].*mounted at")
+
+
 def boot_and_wait_mount(term: "serial_term.Term") -> tuple[bytes, bool, bool]:
-    """Reset target, wait for the msh prompt, then drain a bit so the mmcsd
-    detect thread + auto-mount finish. Returns (buf, msh_ok, capacity_seen)."""
+    """Reset target, wait for the msh prompt, then wait for the `[FS] …
+    mounted at /` line that app_drv_fs prints once auto-mount finished —
+    the exact event the old blind 4 s drain was approximating.
+    Returns (buf, msh_ok, capacity_seen)."""
     jlink.reset_run()
-    time.sleep(0.2)
     buf, msh_ok = term.expect(PROMPT, timeout=6.0)
-    buf += term.read(4.0)
+    if msh_ok and not MOUNTED_RE.search(buf):
+        extra, _ = term.expect(rb"\[FS\].*mounted at", timeout=5.0)
+        buf += extra
+    buf += term.read(0.5)   # short tail: catch a fault right after mount
     return buf, msh_ok, bool(CAPACITY_RE.search(buf))
 
 
 def cmd(term: "serial_term.Term", line: str, timeout: float = 4.0,
-        settle: float = 0.4) -> tuple[bytes, bool]:
+        settle: float = 0.15) -> tuple[bytes, bool]:
     """Send one msh command and wait for the next prompt.
 
     finsh occasionally drops the first keystroke right after printing a prompt

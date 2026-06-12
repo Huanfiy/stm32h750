@@ -29,14 +29,6 @@ BATCH_NO = 77
 LOG_FILE = f"/aglog/B{BATCH_NO:04d}.CSV"
 
 
-def _wait_frames(zq: zqwl_can.ZqwlCan, seconds: float):
-    deadline = time.time() + seconds
-    out = []
-    while time.time() < deadline:
-        out.extend(zq.recv(min(0.2, max(0.0, deadline - time.time()))))
-    return out
-
-
 def _decoded(frames):
     for can_id, payload, _is_fd in frames:
         msg = protocol.decode(can_id, payload)
@@ -44,30 +36,42 @@ def _decoded(frames):
             yield msg
 
 
+def _wait_until(zq: zqwl_can.ZqwlCan, rx: list, cond, timeout: float) -> bool:
+    """Extend `rx` until `cond(rx)` holds or `timeout` elapses (cap, not wait)."""
+    deadline = time.time() + timeout
+    while not cond(rx) and time.time() < deadline:
+        rx.extend(zq.recv(deadline - time.time()))
+    return cond(rx)
+
+
 def _send_wait_ack(zq: zqwl_can.ZqwlCan, frame, ref_low: int, timeout: float = 5.0):
-    rx = []
+    rx: list = []
     can_id, payload = frame
     zq.send(can_id, payload)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        rx.extend(zq.recv(min(0.5, max(0.0, deadline - time.time()))))
-        for msg in _decoded(rx):
-            if isinstance(msg, protocol.Ack) and msg.ref_id_low == ref_low and msg.ok:
-                return rx
+
+    def _acked(r) -> bool:
+        return any(
+            isinstance(msg, protocol.Ack) and msg.ref_id_low == ref_low and msg.ok
+            for msg in _decoded(r)
+        )
+
+    _wait_until(zq, rx, _acked, timeout)
     return rx
 
 
 def _cmd(term: serial_term.Term, line: str, timeout: float = 5.0) -> tuple[bytes, bool]:
-    term.read(0.3)
+    term.read(0.15)
     term.send_line(line)
     return term.expect(PROMPT, timeout)
 
 
 def _boot_and_wait_sd(term: serial_term.Term) -> tuple[bytes, bool, bool]:
     jlink.reset_run()
-    time.sleep(0.2)
     buf, prompt_ok = term.expect(PROMPT, timeout=6.0)
-    buf += term.read(4.0)
+    if prompt_ok and not CAPACITY_RE.search(buf):
+        extra, _ = term.expect(rb"SD card capacity\s+\d+\s*KB", timeout=5.0)
+        buf += extra
+    buf += term.read(0.5)
     return buf, prompt_ok, bool(CAPACITY_RE.search(buf))
 
 
@@ -96,7 +100,7 @@ def main() -> int:
                 return EXIT_SKIP
 
             with zqwl_can.ZqwlCan() as zq:
-                zq.raw_drain(2.0)
+                zq.flush_input()
                 rx = []
                 rx.extend(_send_wait_ack(
                     zq,
@@ -113,12 +117,13 @@ def main() -> int:
                     protocol.encode_control(protocol.CMD_START, batch_no=BATCH_NO, channel_mask=0x0001),
                     0x20,
                 ))
-                rx.extend(_wait_frames(zq, 2.0))
+                def _low_current_seen(r) -> bool:
+                    return any(
+                        isinstance(msg, protocol.Event) and msg.channel_no == 1 and msg.event_type == 0x02
+                        for msg in _decoded(r)
+                    )
 
-                if not any(
-                    isinstance(msg, protocol.Event) and msg.channel_no == 1 and msg.event_type == 0x02
-                    for msg in _decoded(rx)
-                ):
+                if not _wait_until(zq, rx, _low_current_seen, 3.0):
                     print("FAIL: did not observe LOW_CURRENT event for channel 1")
                     return EXIT_FAIL
 

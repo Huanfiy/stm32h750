@@ -1,8 +1,13 @@
 """Standard-library serial driver for the board's msh console (USART1 @ PB14/PB15).
 
-`Term.send_line()` paces characters at ~25 chars/s — the RT-Thread finsh shell
-drops bytes when fed at full 115200 wire speed because its single-char input
-ring runs in the (low-priority) tshell thread, not the UART IRQ.
+Two send paths:
+- `Term.send_line()` — paces characters at ~25 chars/s; safe for lines of any
+  length.
+- `Term.send_raw()` — one burst write; deterministic for ≤ 16 bytes incl. CRLF
+  (the H7 UART RX FIFO depth). The FIFO has been enabled since the 2026-06-02
+  fix — historically full-speed input dropped ~50% of bytes (FIFOEN=0 + QSPI-XIP
+  ISR latency, NOT a finsh-side ring issue); see
+  .agent/fixed/2026-06-02-msh-arrow-history-uart-rx-byte-loss-no-hw-fifo.md.
 """
 
 from __future__ import annotations
@@ -63,6 +68,10 @@ class Term:
 
     def __exit__(self, *exc) -> None:
         self.close()
+
+    def flush_input(self) -> None:
+        """Discard pending input instantly (kernel-side flush, no waiting)."""
+        termios.tcflush(self.fd, termios.TCIFLUSH)
 
     def read(self, seconds: float) -> bytes:
         """Drain whatever the device sends within `seconds`."""

@@ -113,7 +113,10 @@ def _cfg_packet(func: int, rw: int, data: bytes = b"") -> bytes:
 
 def _system_control_payload(channel: int, enabled: bool) -> bytes:
     data = bytearray(16)
-    data[0] = 0x01  # apply settings without writing them to adapter flash
+    # Per vendor manual §系统控制命令: data[0]=0x01 applies the settings (and
+    # persists them to adapter flash); 0x00 leaves them inactive.
+    # data[1] is the device system-reset flag (0x01 = reboot the adapter).
+    data[0] = 0x01
     data[2 + channel] = 0x01 if enabled else 0x00
     return bytes(data)
 
@@ -271,6 +274,15 @@ class ZqwlCan:
                 continue
             if chunk:
                 self._rx_buf.extend(chunk)
+
+    def flush_input(self) -> None:
+        """Discard pending input instantly (parser buffer + kernel tty buffer)."""
+        self._rx_buf.clear()
+        termios.tcflush(self.fd, termios.TCIFLUSH)
+
+    def pending_raw(self) -> bytes:
+        """Bytes received but not yet consumed as frames (diagnostics)."""
+        return bytes(self._rx_buf)
 
     def raw_drain(self, seconds: float) -> bytes:
         data = bytes(self._rx_buf)
