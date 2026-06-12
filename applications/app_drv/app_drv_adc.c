@@ -258,6 +258,76 @@ uint32_t app_drv_adc_raw_to_current_ma(uint16_t raw)
     return ((mv - INA240_REF_MV) * 1000U) / (INA240A2_GAIN * SHUNT_RESISTOR_MOHM);
 }
 
+#define ADC_ZERO_BOOT_FRAMES 50U    /* 500 ms baseline at power-up */
+#define ADC_ZERO_MAX_FRAMES  1000U
+
+static uint16_t adc_zero_raw[APP_DRV_ADC_TOTAL_CH];
+static uint32_t adc_zero_frames;    /* 0 = never calibrated */
+
+int app_drv_adc_zero_calibrate(uint32_t frames)
+{
+    uint32_t acc[APP_DRV_ADC_TOTAL_CH] = {0};
+    uint16_t table[APP_DRV_ADC_TOTAL_CH];
+
+    if (!adc_inited) return -RT_ERROR;
+    if (frames < 1U || frames > ADC_ZERO_MAX_FRAMES) return -RT_EINVAL;
+
+    rt_sem_control(&adc_sem, RT_IPC_CMD_RESET, (void *)0);
+    for (uint32_t f = 0; f < frames; f++) {
+        uint16_t s[APP_DRV_ADC_TOTAL_CH];
+
+        if (app_drv_adc_wait(100) != RT_EOK) return -RT_ETIMEOUT;
+        app_drv_adc_get_snapshot(s);
+        for (uint32_t i = 0; i < APP_DRV_ADC_TOTAL_CH; i++) {
+            acc[i] += s[i];
+        }
+    }
+    for (uint32_t i = 0; i < APP_DRV_ADC_TOTAL_CH; i++) {
+        table[i] = (uint16_t)(acc[i] / frames);
+    }
+
+    /* Readers (adc_dump / monitor thread) index single uint16 entries; swap
+     * the whole table atomically so no reader sees a half-updated baseline. */
+    rt_base_t level = rt_hw_interrupt_disable();
+    memcpy(adc_zero_raw, table, sizeof(adc_zero_raw));
+    adc_zero_frames = frames;
+    rt_hw_interrupt_enable(level);
+    return RT_EOK;
+}
+
+void app_drv_adc_get_zero(uint16_t out[APP_DRV_ADC_TOTAL_CH])
+{
+    rt_base_t level = rt_hw_interrupt_disable();
+    memcpy(out, adc_zero_raw, sizeof(adc_zero_raw));
+    rt_hw_interrupt_enable(level);
+}
+
+uint32_t app_drv_adc_corrected_ma(uint32_t idx, uint16_t raw)
+{
+    uint16_t zero = adc_zero_raw[idx % APP_DRV_ADC_TOTAL_CH];
+
+    if (raw <= zero) {
+        return 0;
+    }
+    return app_drv_adc_raw_to_current_ma((uint16_t)(raw - zero));
+}
+
+static int app_drv_adc_zero_boot(void)
+{
+    /* INIT_APP runs after every INIT_DEVICE hook, so all PWR_EN lines are
+     * already latched inactive — this captures the true zero-current
+     * baseline before any channel can be powered. */
+    int err = app_drv_adc_zero_calibrate(ADC_ZERO_BOOT_FRAMES);
+
+    if (err != RT_EOK) {
+        rt_kprintf("[adc] zero calibration failed (%d)\n", err);
+    } else {
+        rt_kprintf("[adc] zero calibration done (%u frames)\n", ADC_ZERO_BOOT_FRAMES);
+    }
+    return 0;   /* never block the rest of boot */
+}
+INIT_APP_EXPORT(app_drv_adc_zero_boot);
+
 #ifdef RT_USING_FINSH
 #include <finsh.h>
 
@@ -297,7 +367,9 @@ static int cmd_adc_dump(int argc, char **argv)
         return -1;
     }
     uint16_t s[APP_DRV_ADC_TOTAL_CH];
+    uint16_t zero[APP_DRV_ADC_TOTAL_CH];
     app_drv_adc_get_snapshot(s);
+    app_drv_adc_get_zero(zero);
     for (uint32_t i = 0; i < APP_DRV_ADC_TOTAL_CH; i++) {
         const adc_dump_row_t *row = &rows[i];
         int pwr = app_drv_gpio.read(row->pwr_ch);
@@ -305,11 +377,12 @@ static int cmd_adc_dump(int argc, char **argv)
         uint16_t raw = s[row->adc_idx];
 
         if (i == 0U) {
-            rt_kprintf("chn pwr_en en_pin adc_ch      adc_pin raw    ma\n");
+            rt_kprintf("chn pwr_en en_pin adc_ch      adc_pin raw   zero_ma ma\n");
         }
-        rt_kprintf("%-3u %-6s %-6s %-11s %-7s %5u %5u\n",
+        rt_kprintf("%-3u %-6s %-6s %-11s %-7s %5u %7u %5u\n",
                    row->chn, pwr_state, row->pwr_pin, row->adc_ch, row->adc_pin,
-                   raw, app_drv_adc_raw_to_current_ma(raw));
+                   raw, app_drv_adc_raw_to_current_ma(zero[row->adc_idx]),
+                   app_drv_adc_corrected_ma(row->adc_idx, raw));
     }
     uint16_t vref = app_drv_adc_get_vrefint_raw();
     rt_kprintf("vrefint: raw=%5u  mV=%4u\n", vref, app_drv_adc_raw_to_mv(vref));
@@ -317,6 +390,35 @@ static int cmd_adc_dump(int argc, char **argv)
     return 0;
 }
 MSH_CMD_EXPORT_ALIAS(cmd_adc_dump, adc_dump, dump latest 16-ch ADC snapshot);
+
+static int cmd_adc_zero(int argc, char **argv)
+{
+    if (argc > 1) {
+        uint32_t frames = (uint32_t)atoi(argv[1]);
+        int err = app_drv_adc_zero_calibrate(frames);
+
+        if (err != RT_EOK) {
+            rt_kprintf("adc_zero: calibration failed (%d), frames must be 1..%u\n",
+                       err, ADC_ZERO_MAX_FRAMES);
+            return -1;
+        }
+        rt_kprintf("adc_zero: ok frames=%u\n", frames);
+        return 0;
+    }
+
+    /* Status: per-channel baseline in raw counts, chn display order. */
+    uint16_t zero[APP_DRV_ADC_TOTAL_CH];
+    app_drv_adc_get_zero(zero);
+    rt_kprintf("adc_zero: frames=%u%s\n", adc_zero_frames,
+               (adc_zero_frames == 0U) ? " (not calibrated)" : "");
+    rt_kprintf("zero_raw:");
+    for (uint32_t i = 0; i < APP_DRV_ADC_TOTAL_CH; i++) {
+        rt_kprintf(" %5u", zero[adc_rows[i].adc_idx]);
+    }
+    rt_kprintf("\n");
+    return 0;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_adc_zero, adc_zero, show or redo ADC zero-offset calibration);
 
 /* Slot layout for the stats/trace commands: 0..15 = snapshot indices
  * (adc_rows[].adc_idx), 16 = VREFINT. VREFINT never leaves the die, so its

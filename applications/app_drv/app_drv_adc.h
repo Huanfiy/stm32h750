@@ -23,6 +23,13 @@ uint16_t app_drv_adc_get_vrefint_raw(void);
 uint32_t app_drv_adc_raw_to_mv(uint16_t raw);
 uint32_t app_drv_adc_raw_to_current_ma(uint16_t raw);
 
+/* Zero-offset correction: averages `frames` 100Hz frames into a per-channel
+ * baseline table. Runs at boot (INIT_APP, all PWR_EN still inactive) and may
+ * be re-run via the adc_zero msh command. `idx` is the snapshot index. */
+int      app_drv_adc_zero_calibrate(uint32_t frames);
+void     app_drv_adc_get_zero(uint16_t out[APP_DRV_ADC_TOTAL_CH]);
+uint32_t app_drv_adc_corrected_ma(uint32_t idx, uint16_t raw);
+
 #ifdef __cplusplus
 }
 #endif

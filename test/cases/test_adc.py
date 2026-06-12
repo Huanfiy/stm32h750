@@ -2,7 +2,7 @@
 """ADC 16-channel closed-loop test.
 
 Sends `adc_dump` on the msh console and expects 16 table rows of the form
-`chn pwr_en en_pin adc_ch adc_pin raw ma`. Validates that:
+`chn pwr_en en_pin adc_ch adc_pin raw zero_ma ma`. Validates that:
 - the snapshot semaphore releases at all (driver init + DMA + TIM6 work);
 - all 16 channels report (ADC1's 14ch + ADC3's 2ch);
 - PWR_EN status is readable as 0/1, or '-' for reserved channels;
@@ -29,7 +29,8 @@ RESERVED_PWR_CHN = {7, 15}
 EXPECTED_LAST_ADC_PIN = {15: "PC2", 16: "PC3"}
 
 LINE_RE = re.compile(
-    rb"^\s*(\d{1,2})\s+([01-])\s+(P[A-Z]\d+)\s+(ADC[13]_INP\d+)\s+(P[A-Z]\d+)\s+(\d+)\s+(\d+)\s*$",
+    rb"^\s*(\d{1,2})\s+([01-])\s+(P[A-Z]\d+)\s+(ADC[13]_INP\d+)\s+(P[A-Z]\d+)"
+    rb"\s+(\d+)\s+(\d+)\s+(\d+)\s*$",
     re.MULTILINE,
 )
 VREF_RE = re.compile(rb"vrefint:\s+raw=\s*(\d+)\s+mV=\s*(\d+)")
@@ -73,8 +74,9 @@ def main() -> int:
         print(f"FAIL: parsed {len(rows)} channel rows, expected 16")
         return EXIT_FAIL
 
-    for chn_b, pwr_b, en_pin_b, adc_ch_b, adc_pin_b, raw_b, ma_b in rows:
+    for chn_b, pwr_b, en_pin_b, adc_ch_b, adc_pin_b, raw_b, zero_b, ma_b in rows:
         chn, raw, ma = int(chn_b), int(raw_b), int(ma_b)
+        zero_ma = int(zero_b)
         pwr = pwr_b.decode()
         adc_pin = adc_pin_b.decode()
         if pwr not in ("0", "1", "-"):
@@ -97,6 +99,9 @@ def main() -> int:
             return EXIT_FAIL
         if ma > MAX_CURRENT_MA:
             print(f"FAIL: mA {ma} > range {MAX_CURRENT_MA} (chn{chn:02d})")
+            return EXIT_FAIL
+        if zero_ma > MAX_CURRENT_MA:
+            print(f"FAIL: zero_ma {zero_ma} > range {MAX_CURRENT_MA} (chn{chn:02d})")
             return EXIT_FAIL
 
     print(f"PASS: 16/16 channels reported within bounds, vrefint={vref_mv} mV")
